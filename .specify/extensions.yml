@@ -1,0 +1,34 @@
+# Rentiq Spec Kit Extensions
+#
+# Each lifecycle hook group maps to a pre/post hook on the corresponding speckit
+# command.  Hook objects:
+#   extension   – display name
+#   command     – slash-command to invoke
+#   optional    – false = auto-execute; true = show suggestion
+#   enabled     – false = skip silently (default: true)
+#   condition   – null/empty = always executable; non-empty = deferred to HookExecutor
+#   description – human-readable note
+#
+# See: .opencode/commands/speckit.*.md for the full hook dispatch protocol.
+
+hooks:
+  # ── /speckit.specify ──────────────────────────────────────────────────
+  before_specify:
+    - extension: "Git Branch"
+      command: "bash .specify/scripts/bash/create-new-feature.sh --json --short-name '$BRANCH_SHORT_NAME' '$FEATURE_DESCRIPTION'"
+      description: "Create feature branch, spec directory, and spec file before specifying"
+      optional: false
+
+  # ── /speckit.plan ─────────────────────────────────────────────────────
+  before_plan:
+    - extension: "Git Branch"
+      command: "bash .specify/scripts/bash/create-new-feature.sh --json --short-name '$BRANCH_SHORT_NAME' '$FEATURE_DESCRIPTION'"
+      description: "Ensure feature branch exists before planning"
+      optional: true
+
+  # ── /speckit.implement ────────────────────────────────────────────────
+  before_implement:
+    - extension: "Git Status Check"
+      command: "git status --porcelain"
+      description: "Ensure working tree is clean before implementation"
+      optional: true

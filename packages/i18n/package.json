@@ -1,0 +1,11 @@
+{
+  "name": "@rentiq/i18n",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./uk/common.json",
+  "files": [
+    "uk/",
+    "en/"
+  ]
+}

@@ -1146,7 +1146,7 @@ services:
 ```bash
 # Stage uses:
 # - .env.stage (separate file, never committed with secrets)
-# - Different DB: ha_bot_stage (Postgres, same host)
+# - Different DB: rentiq-stage (Postgres, same host)
 # - Different Redis DB index or separate Redis instance on different port
 # - Different MinIO bucket prefix: stage/
 # - Monobank: MONOBANK_TEST_MODE=true

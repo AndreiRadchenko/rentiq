@@ -1,0 +1,18 @@
+[Unit]
+Description=RentIQ API (Stage)
+After=network.target postgresql.service redis.service
+
+[Service]
+Type=simple
+User=rentiq
+WorkingDirectory=/opt/rentiq
+ExecStart=/usr/bin/env node apps/api/dist/main.js
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=/opt/rentiq/.env.stage
+
+# Watchmedo auto-restart for development
+ExecStartPre=/usr/bin/pip3 install watchdog[watchmedo]
+
+[Install]
+WantedBy=multi-user.target

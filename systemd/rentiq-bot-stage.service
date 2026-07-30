@@ -1,0 +1,15 @@
+[Unit]
+Description=RentIQ Telegram Bot (Stage)
+After=network.target postgresql.service redis.service
+
+[Service]
+Type=simple
+User=rentiq
+WorkingDirectory=/opt/rentiq
+ExecStart=/usr/bin/env python3 -m apps.telegram-bot.src.bot
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=/opt/rentiq/.env.stage
+
+[Install]
+WantedBy=multi-user.target
