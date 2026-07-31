@@ -1,0 +1,28 @@
+{
+  "name": "rentiq",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Equipment rental management system",
+  "scripts": {
+    "lint": "nx run-many --target=lint --all",
+    "typecheck": "nx run-many --target=typecheck --all",
+    "test:unit": "nx run-many --target=test:unit --all",
+    "test:e2e": "nx run api:test:e2e",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\""
+  },
+  "devDependencies": {
+    "nx": "19.8.4",
+    "@nx/js": "19.8.4",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.1.0"
+}

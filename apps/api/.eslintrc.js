@@ -1,0 +1,9 @@
+{
+  "extends": "../../.eslintrc.js",
+  "parserOptions": {
+    "project": "./tsconfig.json"
+  },
+  "rules": {
+    "@typescript-eslint/no-explicit-any": "error"
+  }
+}
