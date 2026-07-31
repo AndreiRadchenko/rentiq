@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
-import * as request from 'supertest';
+import request from 'supertest';
 import { TerminusModule } from '@nestjs/terminus';
 import { HealthController } from '../../../src/shared-kernel/interface/health/health.controller';
 import { DrizzleHealthIndicator } from '../../../src/shared-kernel/infrastructure/health/drizzle-health.indicator';
