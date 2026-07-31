@@ -1,0 +1,10 @@
+{
+  "errors": {
+    "TENANT_NOT_FOUND": "Organization not found",
+    "CURRENCY_MISMATCH": "Currency mismatch",
+    "INVALID_CURRENCY": "Invalid currency",
+    "VALIDATION_ERROR": "Validation error",
+    "NOT_FOUND": "Not found",
+    "INTERNAL_ERROR": "Internal server error"
+  }
+}

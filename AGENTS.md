@@ -1,5 +1,9 @@
 # AGENTS.md
 
+## Tool behavior notes
+
+**Glob limitation**: The `glob` tool skips dot-prefixed directories (`.specify/`, `.opencode/`, etc.). When searching for files in dot-prefixed paths, use `bash` with `ls` or the `read` tool directly instead of relying on `glob`.
+
 ## Repo stage — read this first
 
 This repo currently contains **no application code** — no `package.json`, no `apps/`, no
