@@ -1,0 +1,10 @@
+{
+  "errors": {
+    "TENANT_NOT_FOUND": "Організацію не знайдено",
+    "CURRENCY_MISMATCH": "Невідповідність валют",
+    "INVALID_CURRENCY": "Неприпустима валюта",
+    "VALIDATION_ERROR": "Помилка валідації",
+    "NOT_FOUND": "Не знайдено",
+    "INTERNAL_ERROR": "Внутрішня помилка сервера"
+  }
+}

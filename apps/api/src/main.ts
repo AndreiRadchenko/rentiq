@@ -1,18 +1,12 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { validateEnv } from './shared-kernel/infrastructure/config/env';
 
 async function bootstrap() {
-  if (process.env.NODE_ENV === 'production') {
-    const { execSync } = await import('child_process');
-    try {
-      execSync('npm run db:migrate', { stdio: 'inherit' });
-    } catch (error) {
-      console.error('❌ Migration failed. Refusing to start in production with pending migrations.');
-      process.exit(1);
-    }
-  }
+  validateEnv();
 
   const app = await NestFactory.create(AppModule);
+  app.setGlobalPrefix('api');
   await app.listen(3000);
 }
 bootstrap();
