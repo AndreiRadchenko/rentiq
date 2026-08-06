@@ -10,6 +10,8 @@ module.exports = {
         tsconfig: {
           experimentalDecorators: true,
           emitDecoratorMetadata: true,
+          esModuleInterop: true,
+          allowSyntheticDefaultImports: true,
         },
       },
     ],

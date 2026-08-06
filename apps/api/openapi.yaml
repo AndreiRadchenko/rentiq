@@ -1,0 +1,499 @@
+openapi: 3.0.3
+info:
+  title: RentIQ API — IAM + Organizations (Phase 2)
+  description: |
+    Authentication, renter identity, and organization management for the RentIQ modular
+    monolith. All endpoints live under the `/api` global prefix (`servers[0]` below already
+    includes it; controllers map `v1/...`).
+
+    Error envelope (Phase 1): `{ "correlationId", "code", "message", "timestamp" }` where
+    `message` is localized per ADR-006 (JWT `locale` claim → org `defaultLocale` → `uk`).
+    See `specs/005-iam-organizations/contracts/api.md` for the authoritative error-code table.
+  version: 0.2.0
+servers:
+  - url: /api
+tags:
+  - name: Auth
+    description: Admin login / refresh (US3)
+  - name: Renters
+    description: Renter identity, consent, locale (US1/US2/US4/US7)
+  - name: Organizations
+    description: Org bootstrap, branding, maintenance window (US6)
+paths:
+  /v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Admin login
+      description: Returns an access + refresh token pair. Uniform `INVALID_CREDENTIALS` (401) for wrong credentials and disabled accounts (NFR-009).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Token pair + admin identity
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '401':
+          description: INVALID_CREDENTIALS
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate the refresh token
+      description: Invalidates the presented refresh token and reissues a new pair (rotation).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: New token pair (same shape as login)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '401':
+          description: INVALID_REFRESH_TOKEN
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /v1/auth/telegram/exchange:
+    post:
+      tags: [Auth]
+      summary: Exchange a Telegram session for a renter JWT
+      description: Called by the bot with the org bot secret. Renter must exist and be ACTIVE in the bot's org.
+      security:
+        - BotSecret: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TelegramExchangeRequest' }
+      responses:
+        '200':
+          description: Renter JWT + profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TelegramExchangeResponse' }
+        '401':
+          description: BOT_SECRET_INVALID
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: RENTER_NOT_REGISTERED | RENTER_DISABLED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /v1/renters/register:
+    post:
+      tags: [Renters]
+      summary: Register a renter (public, bot-invoked)
+      description: |
+        Creates a renter identity with explicit consent (BR-01.1) and returns a renter JWT.
+        An existing ACTIVE renter with the same phone in this org returns the existing
+        identity with `alreadyRegistered: true` (FR-028).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRenterRequest' }
+      responses:
+        '200':
+          description: Renter profile + JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegisterRenterResponse' }
+        '400':
+          description: CONSENT_REQUIRED | VALIDATION_ERROR
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: RENTER_DISABLED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /v1/renters/me:
+    get:
+      tags: [Renters]
+      summary: Current renter profile
+      security:
+        - Bearer: []
+      responses:
+        '200':
+          description: Renter profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  renter: { $ref: '#/components/schemas/RenterProfile' }
+        '403':
+          description: FORBIDDEN (token type is not renter)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    patch:
+      tags: [Renters]
+      summary: Change renter locale (changeable at any time, DR-003)
+      security:
+        - Bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateLocaleRequest' }
+      responses:
+        '200':
+          description: Renter profile with updated locale
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  renter: { $ref: '#/components/schemas/RenterProfile' }
+        '400':
+          description: VALIDATION_ERROR (locale outside org supportedLocales, BR-02.2)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /v1/renters/me/re-consent:
+    post:
+      tags: [Renters]
+      summary: Accept the current consent statement (FR-024, DR-005)
+      description: |
+        Records acceptance of a material consent change. Never deletes or anonymizes the
+        renter. An unknown or non-current `consentVersion` is rejected.
+      security:
+        - Bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReConsentRequest' }
+      responses:
+        '200':
+          description: Renter profile with updated consentVersion
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  renter: { $ref: '#/components/schemas/RenterProfile' }
+        '400':
+          description: RE_CONSENT_REQUIRED | VALIDATION_ERROR
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /v1/organizations:
+    post:
+      tags: [Organizations]
+      summary: Create an organization + bootstrap ORG_ADMIN (SUPER_ADMIN only)
+      security:
+        - Bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateOrganizationRequest' }
+      responses:
+        '201':
+          description: Organization + bootstrap admin
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateOrganizationResponse' }
+        '400':
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '409':
+          description: SLUG_TAKEN
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /v1/organizations/{id}/branding:
+    patch:
+      tags: [Organizations]
+      summary: Update organization branding (SUPER_ADMIN only)
+      security:
+        - Bearer: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateBrandingRequest' }
+      responses:
+        '200':
+          description: Updated organization branding
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organization:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      status: { type: string, enum: [ACTIVE, SUSPENDED] }
+                      branding: { $ref: '#/components/schemas/Branding' }
+        '400':
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: FORBIDDEN | ORG_SUSPENDED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /v1/organizations/{id}/maintenance-window:
+    post:
+      tags: [Organizations]
+      summary: Set the org maintenance window
+      description: |
+        ORG_ADMIN (own org) or SUPER_ADMIN (any org) per roadmap. Actual downtime
+        enforcement is owned by later capabilities; this endpoint only configures the window.
+      security:
+        - Bearer: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MaintenanceWindowRequest' }
+      responses:
+        '200':
+          description: Updated organization with maintenance window
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organization:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      maintenanceWindow: { $ref: '#/components/schemas/MaintenanceWindow' }
+        '400':
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: FORBIDDEN | ORG_SUSPENDED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+components:
+  securitySchemes:
+    Bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 'Admin or renter JWT (RS256). Admin endpoints reject `type: renter` tokens and vice versa (FORBIDDEN).'
+    BotSecret:
+      type: http
+      scheme: bearer
+      description: 'Bot secret for the telegram exchange — `Authorization: Bot <secret>`.'
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [correlationId, code, message, timestamp]
+      properties:
+        correlationId: { type: string, format: uuid }
+        code: { type: string, description: 'Error code, e.g. INVALID_CREDENTIALS, CONSENT_REQUIRED' }
+        message: { type: string, description: 'Localized message (ADR-006 chain: JWT locale → org defaultLocale → uk)' }
+        timestamp: { type: string, format: date-time }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, description: 'Case-insensitive' }
+        password: { type: string, format: password, description: 'Plaintext, never logged' }
+    LoginResponse:
+      type: object
+      required: [accessToken, refreshToken, expiresIn, admin]
+      properties:
+        accessToken: { type: string, description: 'RS256 JWT, 15-min TTL' }
+        refreshToken: { type: string, description: 'RS256 JWT, 7-day TTL, tokenType refresh' }
+        expiresIn: { type: integer, description: 'Access TTL seconds (900)' }
+        admin:
+          type: object
+          required: [id, orgId, role, email]
+          properties:
+            id: { type: string, format: uuid }
+            orgId: { type: string, format: uuid, nullable: true, description: 'null for SUPER_ADMIN' }
+            role: { type: string, enum: [SUPER_ADMIN, ORG_ADMIN, STATION_OPERATOR] }
+            email: { type: string, format: email }
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string }
+    TelegramExchangeRequest:
+      type: object
+      required: [telegramId]
+      properties:
+        telegramId: { type: integer, format: int64, description: 'Telegram user id' }
+    TelegramExchangeResponse:
+      type: object
+      required: [accessToken, expiresIn, renter]
+      properties:
+        accessToken: { type: string, description: 'Renter JWT (type: renter), 15-min TTL' }
+        expiresIn: { type: integer }
+        renter: { $ref: '#/components/schemas/RenterProfile' }
+    RegisterRenterRequest:
+      type: object
+      required: [name, phone, consentGiven, consentVersion]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255 }
+        phone: { type: string, pattern: '^\\+[0-9]{8,15}$', description: 'E.164' }
+        consentGiven: { type: boolean, description: 'Must be true (BR-01.1)' }
+        consentVersion: { type: string, description: 'Currently-published statement version, e.g. "v1"' }
+        locale: { type: string, enum: [uk, en], default: uk }
+        telegramId: { type: integer, format: int64, description: 'Bind to Telegram now (used at exchange)' }
+    RegisterRenterResponse:
+      type: object
+      required: [renter, accessToken, expiresIn, alreadyRegistered]
+      properties:
+        renter: { $ref: '#/components/schemas/RenterProfile' }
+        accessToken: { type: string }
+        expiresIn: { type: integer }
+        alreadyRegistered: { type: boolean, description: 'true when the phone was already bound to an ACTIVE renter (FR-028)' }
+    RenterProfile:
+      type: object
+      required: [id, orgId, name, phone, consentGivenAt, consentVersion, locale, status]
+      properties:
+        id: { type: string, format: uuid }
+        orgId: { type: string, format: uuid }
+        name: { type: string }
+        phone: { type: string, pattern: '^\\+[0-9]{8,15}$' }
+        consentGivenAt: { type: string, format: date-time }
+        consentVersion: { type: string }
+        locale: { type: string, enum: [uk, en] }
+        status: { type: string, enum: [ACTIVE, DISABLED] }
+    UpdateLocaleRequest:
+      type: object
+      required: [locale]
+      properties:
+        locale: { type: string, enum: [uk, en], description: 'Must be in the org supportedLocales (BR-02.2)' }
+    ReConsentRequest:
+      type: object
+      required: [consentVersion]
+      properties:
+        consentVersion: { type: string, description: 'Must equal the currently-published statement version' }
+    CreateOrganizationRequest:
+      type: object
+      required: [name, slug, adminEmail, adminPassword, telegramBotSecret]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255 }
+        slug: { type: string, pattern: '^[a-z0-9-]{1,63}$', description: 'Unique, lowercase' }
+        adminEmail: { type: string, format: email }
+        adminPassword: { type: string, format: password, minLength: 8 }
+        defaultLocale: { type: string, enum: [uk, en], default: uk }
+        supportedLocales: { type: array, items: { type: string, enum: [uk, en] }, default: ['uk', 'en'] }
+        businessName: { type: string, description: 'Defaults to name' }
+        telegramBotSecret: { type: string, description: 'Stored hashed (bcrypt); never returned' }
+    CreateOrganizationResponse:
+      type: object
+      required: [organization, bootstrapAdmin]
+      properties:
+        organization:
+          type: object
+          required: [id, name, slug, status, branding]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            slug: { type: string }
+            status: { type: string, enum: [ACTIVE, SUSPENDED] }
+            branding: { $ref: '#/components/schemas/Branding' }
+        bootstrapAdmin:
+          type: object
+          required: [id, orgId, role, email]
+          properties:
+            id: { type: string, format: uuid }
+            orgId: { type: string, format: uuid }
+            role: { type: string, enum: [ORG_ADMIN] }
+            email: { type: string, format: email }
+    UpdateBrandingRequest:
+      type: object
+      description: All fields optional — partial update
+      properties:
+        logoUrl: { type: string, format: uri, nullable: true, description: 'null clears' }
+        primaryColor: { type: string, pattern: '^#[0-9a-fA-F]{6}$' }
+        businessName: { type: string, minLength: 1, maxLength: 255 }
+        supportedLocales: { type: array, items: { type: string, enum: [uk, en] }, minItems: 1 }
+        defaultLocale: { type: string, enum: [uk, en], description: 'Must be in supportedLocales' }
+    Branding:
+      type: object
+      required: [logoUrl, primaryColor, businessName, supportedLocales, defaultLocale]
+      properties:
+        logoUrl: { type: string, nullable: true }
+        primaryColor: { type: string, nullable: true, pattern: '^#[0-9a-fA-F]{6}$' }
+        businessName: { type: string }
+        supportedLocales: { type: array, items: { type: string, enum: [uk, en] } }
+        defaultLocale: { type: string, enum: [uk, en] }
+    MaintenanceWindowRequest:
+      type: object
+      required: [startTime, endTime]
+      properties:
+        startTime: { type: string, pattern: '^([01]\\d|2[0-3]):[0-5]\\d$', example: '02:00' }
+        endTime: { type: string, pattern: '^([01]\\d|2[0-3]):[0-5]\\d$', description: 'Must be after startTime', example: '04:00' }
+        timezone: { type: string, default: 'Europe/Kyiv', description: 'IANA tz name' }
+    MaintenanceWindow:
+      type: object
+      required: [startTime, endTime, timezone]
+      properties:
+        startTime: { type: string }
+        endTime: { type: string }
+        timezone: { type: string }
