@@ -1,5 +1,10 @@
 # AGENTS.md
 
+Be concise and direct. Skip preamble, explanations of what you're about to do, and 
+summaries of what you did. Output only the final answer, code, or result — no 
+step-by-step reasoning, no restating the task, no closing recap.
+
+
 ## Tool behavior notes
 
 **Glob limitation**: The `glob` tool skips dot-prefixed directories (`.specify/`, `.opencode/`, etc.). When searching for files in dot-prefixed paths, use `bash` with `ls` or the `read` tool directly instead of relying on `glob`.
@@ -9,8 +14,7 @@
 This repo currently contains **no application code** — no `package.json`, no `apps/`, no
 build/test/lint tooling. It is 100% in the spec-authoring stage for a system that does not
 exist yet. Do not assume any of the modules, endpoints, or file layouts described in
-`docs/` are implemented — they are a plan, not a codebase. Also: git has **zero commits**
-(`main` has no history yet); everything is currently untracked.
+`docs/` are implemented — they are a plan, not a codebase. 
 
 ## Source of truth
 
