@@ -1,0 +1,6 @@
+{
+  "slug_taken": "Organization slug already in use",
+  "org_suspended": "Organization is suspended",
+  "org_not_found": "Organization not found",
+  "validation_error": "Validation error"
+}

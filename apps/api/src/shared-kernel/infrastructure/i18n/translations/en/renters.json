@@ -1,0 +1,8 @@
+{
+  "consent_required": "Explicit consent to personal-data processing is required",
+  "re_consent_required": "Re-consent is required after a change to the data-processing terms",
+  "renter_not_registered": "Renter is not registered",
+  "renter_disabled": "Renter account is disabled",
+  "renter_already_registered": "Renter already registered in this organization",
+  "validation_error": "Validation error"
+}

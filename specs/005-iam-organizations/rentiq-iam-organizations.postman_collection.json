@@ -1,0 +1,363 @@
+{
+  "info": {
+    "name": "RentIQ — IAM + Organizations (Phase 2)",
+    "_postman_id": "f3c4a5b6-0000-4000-8000-rentiq005-0002",
+    "description": "Validation scenarios V1–V6 from specs/005-iam-organizations/quickstart.md. Prereqs: app running on :3000, seed run (org slug `rentiq`, SUPER_ADMIN admin@rentiq.dev/change-me, bot secret `rentiq-dev-bot-secret`).\n\nCollection variables: baseUrl, adminEmail, adminPassword, botSecret, telegramId, orgSlug (unique slug for V2).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000/api/v1" },
+    { "key": "adminEmail", "value": "super@rentiq.dev" },
+    { "key": "adminPassword", "value": "change-me" },
+    { "key": "botSecret", "value": "rentiq-dev-bot-secret" },
+    { "key": "telegramId", "value": "123456789" },
+    { "key": "orgSlug", "value": "second-org" },
+    { "key": "accessToken", "value": "" },
+    { "key": "refreshToken", "value": "" },
+    { "key": "renterToken", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "V1 — Admin login",
+      "item": [
+        {
+          "name": "Login (200, sets accessToken + refreshToken)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('token pair present', () => { const b = pm.response.json(); pm.expect(b.accessToken).to.be.a('string'); pm.expect(b.refreshToken).to.be.a('string'); pm.expect(b.admin.role).to.eql('SUPER_ADMIN'); });",
+                  "pm.collectionVariables.set('accessToken', pm.response.json().accessToken);",
+                  "pm.collectionVariables.set('refreshToken', pm.response.json().refreshToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] },
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}" }
+          }
+        },
+        {
+          "name": "Wrong password → 401 INVALID_CREDENTIALS (NFR-009)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('code is INVALID_CREDENTIALS', () => pm.expect(pm.response.json().code).to.eql('INVALID_CREDENTIALS'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] },
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"wrong-password\"\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "V2 — SUPER_ADMIN creates a second org",
+      "item": [
+        {
+          "name": "Create org (201)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('org + bootstrap admin', () => { const b = pm.response.json(); pm.expect(b.organization.slug).to.eql(pm.collectionVariables.get('orgSlug')); pm.expect(b.bootstrapAdmin.role).to.eql('ORG_ADMIN'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/organizations", "host": ["{{baseUrl}}"], "path": ["organizations"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Second Org\",\n  \"slug\": \"{{orgSlug}}\",\n  \"adminEmail\": \"admin@{{orgSlug}}.dev\",\n  \"adminPassword\": \"org-pass-123\",\n  \"telegramBotSecret\": \"{{orgSlug}}-secret\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Same slug again → 409 SLUG_TAKEN",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 409', () => pm.response.to.have.status(409));",
+                  "pm.test('code is SLUG_TAKEN', () => pm.expect(pm.response.json().code).to.eql('SLUG_TAKEN'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/organizations", "host": ["{{baseUrl}}"], "path": ["organizations"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Second Org\",\n  \"slug\": \"{{orgSlug}}\",\n  \"adminEmail\": \"admin@{{orgSlug}}.dev\",\n  \"adminPassword\": \"org-pass-123\",\n  \"telegramBotSecret\": \"{{orgSlug}}-secret\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "V3 — Renter registers + telegram exchange",
+      "item": [
+        {
+          "name": "Register renter (200, sets renterToken)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('renter ACTIVE with consent', () => { const b = pm.response.json(); pm.expect(b.renter.status).to.eql('ACTIVE'); pm.expect(b.renter.consentGivenAt).to.be.a('string'); pm.expect(b.alreadyRegistered).to.eql(false); });",
+                  "pm.collectionVariables.set('renterToken', pm.response.json().accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/renters/register", "host": ["{{baseUrl}}"], "path": ["renters", "register"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Олег\",\n  \"phone\": \"+380501234567\",\n  \"consentGiven\": true,\n  \"consentVersion\": \"v1\",\n  \"locale\": \"uk\",\n  \"telegramId\": {{telegramId}}\n}"
+            }
+          }
+        },
+        {
+          "name": "Telegram exchange (200, Bot secret)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('renter JWT issued', () => { const b = pm.response.json(); pm.expect(b.accessToken).to.be.a('string'); pm.expect(b.renter.telegramId).to.be.undefined; pm.expect(b.renter.status).to.eql('ACTIVE'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bot {{botSecret}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/auth/telegram/exchange", "host": ["{{baseUrl}}"], "path": ["auth", "telegram", "exchange"] },
+            "body": { "mode": "raw", "raw": "{\n  \"telegramId\": {{telegramId}}\n}" }
+          }
+        },
+        {
+          "name": "GET /renters/me (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('renter profile', () => { const b = pm.response.json(); pm.expect(b.renter.phone).to.eql('+380501234567'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{renterToken}}" }],
+            "url": { "raw": "{{baseUrl}}/renters/me", "host": ["{{baseUrl}}"], "path": ["renters", "me"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "V4 — Locale resolution (ADR-006)",
+      "item": [
+        {
+          "name": "Unauthenticated GET /renters/me → 401 localized (JWT locale claim wins)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('localized message present', () => pm.expect(pm.response.json().message).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept-Language", "value": "uk" }],
+            "url": { "raw": "{{baseUrl}}/renters/me", "host": ["{{baseUrl}}"], "path": ["renters", "me"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "V5 — Refresh rotation",
+      "item": [
+        {
+          "name": "Refresh (200, rotates token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('new refresh token differs', () => pm.expect(pm.response.json().refreshToken).to.not.eql(pm.collectionVariables.get('refreshToken')));",
+                  "pm.collectionVariables.set('refreshToken', pm.response.json().refreshToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/auth/refresh", "host": ["{{baseUrl}}"], "path": ["auth", "refresh"] },
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" }
+          }
+        },
+        {
+          "name": "Reuse old refresh token → 401 INVALID_REFRESH_TOKEN",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('code is INVALID_REFRESH_TOKEN', () => pm.expect(pm.response.json().code).to.eql('INVALID_REFRESH_TOKEN'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/auth/refresh", "host": ["{{baseUrl}}"], "path": ["auth", "refresh"] },
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "V6 — Preconditions and business rules",
+      "item": [
+        {
+          "name": "Register with consentGiven=false → 400 CONSENT_REQUIRED",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('code is CONSENT_REQUIRED', () => pm.expect(pm.response.json().code).to.eql('CONSENT_REQUIRED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/renters/register", "host": ["{{baseUrl}}"], "path": ["renters", "register"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Олег\",\n  \"phone\": \"+380501234567\",\n  \"consentGiven\": false,\n  \"consentVersion\": \"v1\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Re-register same phone → 200 alreadyRegistered=true (FR-028)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('alreadyRegistered true', () => pm.expect(pm.response.json().alreadyRegistered).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/renters/register", "host": ["{{baseUrl}}"], "path": ["renters", "register"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Олег\",\n  \"phone\": \"+380501234567\",\n  \"consentGiven\": true,\n  \"consentVersion\": \"v1\",\n  \"telegramId\": {{telegramId}}\n}"
+            }
+          }
+        },
+        {
+          "name": "Exchange with wrong bot secret → 401 BOT_SECRET_INVALID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('code is BOT_SECRET_INVALID', () => pm.expect(pm.response.json().code).to.eql('BOT_SECRET_INVALID'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bot wrong-secret" }
+            ],
+            "url": { "raw": "{{baseUrl}}/auth/telegram/exchange", "host": ["{{baseUrl}}"], "path": ["auth", "telegram", "exchange"] },
+            "body": { "mode": "raw", "raw": "{\n  \"telegramId\": {{telegramId}}\n}" }
+          }
+        },
+        {
+          "name": "Exchange for unknown telegramId → 403 RENTER_NOT_REGISTERED",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('code is RENTER_NOT_REGISTERED', () => pm.expect(pm.response.json().code).to.eql('RENTER_NOT_REGISTERED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bot {{botSecret}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/auth/telegram/exchange", "host": ["{{baseUrl}}"], "path": ["auth", "telegram", "exchange"] },
+            "body": { "mode": "raw", "raw": "{\n  \"telegramId\": 999999999\n}" }
+          }
+        }
+      ]
+    }
+  ]
+}
