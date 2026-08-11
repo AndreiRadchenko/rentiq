@@ -35,10 +35,28 @@ async function makeOrg() {
       supportedLocales: ['uk', 'en'],
       defaultLocale: 'uk',
     },
-    paymentCredsRef: { gateway: '', secretRef: '', enabled: false },
+    paymentCreds: {
+      mode: 'test',
+      testTokenEncrypted: '',
+      liveTokenEncrypted: '',
+      redirectUrl: '',
+      enabled: false,
+    },
+    paymentDetails: {
+      payerName: '',
+      iban: '',
+      edrpou: '',
+      purpose: '',
+    },
     telegramConfig: { botSecretHash: await bcrypt.hash('secret', 4), botUsername: 'bot' },
     maintenanceWindow: null,
-    checkboxConfig: null,
+    checkboxConfig: {
+      mode: 'test',
+      licenseKeyEncrypted: '',
+      testTokenEncrypted: '',
+      liveTokenEncrypted: '',
+      enabled: false,
+    },
   });
 }
 

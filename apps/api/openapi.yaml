@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: RentIQ API — IAM + Organizations (Phase 2)
+  title: RentIQ API — IAM + Organizations + Locations + Pricing (Phase 3)
   description: |
     Authentication, renter identity, and organization management for the RentIQ modular
     monolith. All endpoints live under the `/api` global prefix (`servers[0]` below already
@@ -19,6 +19,16 @@ tags:
     description: Renter identity, consent, locale (US1/US2/US4/US7)
   - name: Organizations
     description: Org bootstrap, branding, maintenance window (US6)
+  - name: Stations
+    description: Station CRUD + renter bookable list + health (Phase 3)
+  - name: Lockers
+    description: Locker CRUD + manual open/close (Phase 3)
+  - name: InventoryKits
+    description: Inventory kit CRUD (Phase 3)
+  - name: Tariffs
+    description: Tariff CRUD + quote (Phase 3)
+  - name: Webhooks
+    description: HA door-events ingress (Phase 3)
 paths:
   /v1/auth/login:
     post:
@@ -334,6 +344,373 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /v1/stations:
+    get:
+      tags: [Stations]
+      summary: List stations (admin) or bookable stations (renter)
+      description: Admin returns all org stations; renter variant `?visible=true&active=true` returns only bookable stations with `availableLockersCount`.
+      parameters:
+        - in: query
+          name: visible
+          schema: { type: boolean }
+        - in: query
+          name: active
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Station list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StationListResponse' }
+    post:
+      tags: [Stations]
+      summary: Create a station
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateStationRequest' }
+      responses:
+        '201':
+          description: Created station
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StationResponse' }
+        '422':
+          description: STATION_AUTOLOCK_INVALID / STATION_TOKEN_REF_EMPTY / STATION_HA_URL_INVALID
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /v1/stations/{id}:
+    get:
+      tags: [Stations]
+      summary: Fetch one station (admin view)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Station
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StationResponse' }
+        '404':
+          description: STATION_NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    patch:
+      tags: [Stations]
+      summary: Update station fields (independent active/visible toggles, FR-004)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateStationRequest' }
+      responses:
+        '200':
+          description: Updated station
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StationResponse' }
+  /v1/stations/{id}/health:
+    get:
+      tags: [Stations]
+      summary: Station health status
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Health view
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StationHealthResponse' }
+  /v1/stations/{id}/lockers:
+    get:
+      tags: [Stations]
+      summary: List bookable lockers for a station (renter)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Bookable lockers with tariffs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RenterLockerListResponse' }
+  /v1/lockers:
+    post:
+      tags: [Lockers]
+      summary: Create a locker
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateLockerRequest' }
+      responses:
+        '201':
+          description: Created locker
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LockerResponse' }
+  /v1/lockers/{id}:
+    patch:
+      tags: [Lockers]
+      summary: Assign/unassign kit, toggle maintenance
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateLockerRequest' }
+      responses:
+        '200':
+          description: Updated locker
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LockerResponse' }
+  /v1/lockers/{id}/open:
+    post:
+      tags: [Lockers]
+      summary: Admin manual open (schedules auto-relock)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Acknowledged
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Acknowledged' }
+        '503':
+          description: LOCKER_STATION_OFFLINE
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '502':
+          description: LOCKER_OPEN_FAILED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /v1/lockers/{id}/close:
+    post:
+      tags: [Lockers]
+      summary: Admin manual close (idempotent, FR-015)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Acknowledged
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Acknowledged' }
+  /v1/inventory-kits:
+    post:
+      tags: [InventoryKits]
+      summary: Create an inventory kit
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateKitRequest' }
+      responses:
+        '201':
+          description: Created kit
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KitResponse' }
+  /v1/inventory-kits/{id}:
+    patch:
+      tags: [InventoryKits]
+      summary: Update / reassign a kit
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateKitRequest' }
+      responses:
+        '200':
+          description: Updated kit
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KitResponse' }
+    delete:
+      tags: [InventoryKits]
+      summary: Soft-retire a kit (unassign)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Acknowledged
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Acknowledged' }
+  /v1/tariffs:
+    get:
+      tags: [Tariffs]
+      summary: List tariffs (optional filter)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: kitType
+          schema: { type: string }
+        - in: query
+          name: dayType
+          schema: { type: string, enum: [WEEKDAY, WEEKEND] }
+      responses:
+        '200':
+          description: Tariff list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TariffListResponse' }
+    post:
+      tags: [Tariffs]
+      summary: Create a tariff
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTariffRequest' }
+      responses:
+        '201':
+          description: Created tariff
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TariffResponse' }
+        '422':
+          description: DUPLICATE_TARIFF / TARIFF_DURATION_INVALID / TARIFF_PRICE_INVALID / TARIFF_DAY_TYPE_INVALID
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /v1/tariffs/quote:
+    get:
+      tags: [Tariffs]
+      summary: Quote a price for a (kitType, dayType, durationMinutes)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: kitType
+          required: true
+          schema: { type: string }
+        - in: query
+          name: dayType
+          required: true
+          schema: { type: string, enum: [WEEKDAY, WEEKEND] }
+        - in: query
+          name: durationMinutes
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Quote
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TariffQuoteResponse' }
+        '404':
+          description: TARIFF_NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /v1/tariffs/{id}:
+    patch:
+      tags: [Tariffs]
+      summary: Update price/currency (key immutable)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTariffRequest' }
+      responses:
+        '200':
+          description: Updated tariff
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TariffResponse' }
+    delete:
+      tags: [Tariffs]
+      summary: Soft delete a tariff
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: No content
+  /v1/webhooks/ha/door-events:
+    post:
+      tags: [Webhooks]
+      summary: HA door-events ingress (shared-secret auth, not JWT)
+      description: OPEN on AVAILABLE locker → UnauthorizedDoorOpenDetected; OPEN with rental → LockerOpened; CLOSED → LockerClosed.
+      parameters:
+        - in: header
+          name: X-HA-Webhook-Secret
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DoorEventRequest' }
+      responses:
+        '200':
+          description: Acknowledged
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Acknowledged' }
+        '401':
+          description: WEBHOOK_SECRET_INVALID
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 components:
   securitySchemes:
     Bearer:
@@ -497,3 +874,175 @@ components:
         startTime: { type: string }
         endTime: { type: string }
         timezone: { type: string }
+    CreateStationRequest:
+      type: object
+      required: [name, haUrlOrIp, haTokenRef]
+      properties:
+        name: { type: string, maxLength: 255 }
+        address: { type: string, nullable: true }
+        haUrlOrIp: { type: string }
+        haTokenRef: { type: string }
+        autoLockDelaySec: { type: integer, minimum: 1, default: 30 }
+        sortOrder: { type: integer, default: 0 }
+    UpdateStationRequest:
+      type: object
+      properties:
+        name: { type: string }
+        address: { type: string, nullable: true }
+        isActive: { type: boolean }
+        isVisibleToClients: { type: boolean }
+        workingStatus: { type: string, enum: [WORKING, MAINTENANCE] }
+        autoLockDelaySec: { type: integer, minimum: 1 }
+        haUrlOrIp: { type: string }
+        haTokenRef: { type: string }
+        sortOrder: { type: integer }
+    StationResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        address: { type: string, nullable: true }
+        workingStatus: { type: string }
+        isActive: { type: boolean }
+        adminIntendedIsActive: { type: boolean }
+        isVisibleToClients: { type: boolean }
+        sortOrder: { type: integer }
+        haUrlOrIp: { type: string }
+        haTokenRef: { type: string }
+        autoLockDelaySec: { type: integer }
+        healthStatus: { type: string }
+        lastHealthCheckAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    StationListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/StationResponse' }
+    StationHealthResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        healthStatus: { type: string }
+        lastHealthCheckAt: { type: string, format: date-time, nullable: true }
+        adminIntendedIsActive: { type: boolean }
+        isActiveForBookability: { type: boolean }
+    RenterLockerListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/RenterLockerView' }
+    RenterLockerView:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        kitType: { type: string }
+        tariffs:
+          type: array
+          items: { $ref: '#/components/schemas/TariffView' }
+    TariffView:
+      type: object
+      properties:
+        tariffId: { type: string, format: uuid }
+        durationMinutes: { type: integer }
+        priceMinor: { type: integer }
+        currency: { type: string }
+    CreateLockerRequest:
+      type: object
+      required: [stationId, name, haLockEntityId, haDoorSensorEntityId]
+      properties:
+        stationId: { type: string, format: uuid }
+        name: { type: string, maxLength: 100 }
+        haLockEntityId: { type: string }
+        haDoorSensorEntityId: { type: string }
+    UpdateLockerRequest:
+      type: object
+      properties:
+        name: { type: string }
+        inventoryKitId: { type: string, format: uuid, nullable: true }
+        status: { type: string, enum: [AVAILABLE, MAINTENANCE] }
+    LockerResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        stationId: { type: string, format: uuid }
+        name: { type: string }
+        status: { type: string }
+        haLockEntityId: { type: string }
+        haDoorSensorEntityId: { type: string }
+        currentRentalId: { type: string, format: uuid, nullable: true }
+        inventoryKitId: { type: string, format: uuid, nullable: true }
+        misconfigured: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    CreateKitRequest:
+      type: object
+      required: [stationId, name, kitType]
+      properties:
+        stationId: { type: string, format: uuid }
+        name: { type: string }
+        kitType: { type: string }
+    UpdateKitRequest:
+      type: object
+      properties:
+        name: { type: string }
+        kitType: { type: string }
+        lockerId: { type: string, format: uuid, nullable: true }
+    KitResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        stationId: { type: string, format: uuid }
+        lockerId: { type: string, format: uuid, nullable: true }
+        name: { type: string }
+        kitType: { type: string }
+        createdAt: { type: string, format: date-time }
+    CreateTariffRequest:
+      type: object
+      required: [kitType, dayType, durationMinutes, priceMinor]
+      properties:
+        kitType: { type: string }
+        dayType: { type: string, enum: [WEEKDAY, WEEKEND] }
+        durationMinutes: { type: integer, minimum: 1 }
+        priceMinor: { type: integer, minimum: 0 }
+        currency: { type: string, default: UAH }
+    UpdateTariffRequest:
+      type: object
+      properties:
+        priceMinor: { type: integer, minimum: 0 }
+        currency: { type: string }
+    TariffResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        kitType: { type: string }
+        dayType: { type: string }
+        durationMinutes: { type: integer }
+        priceMinor: { type: integer }
+        currency: { type: string }
+        deletedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    TariffListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TariffResponse' }
+    TariffQuoteResponse:
+      type: object
+      properties:
+        priceMinor: { type: integer }
+        currency: { type: string }
+        tariffId: { type: string, format: uuid }
+    DoorEventRequest:
+      type: object
+      required: [lockerId, doorState, eventTimestamp]
+      properties:
+        lockerId: { type: string, format: uuid }
+        doorState: { type: string, enum: [OPEN, CLOSED, UNKNOWN] }
+        eventTimestamp: { type: string, format: date-time }
+    Acknowledged:
+      type: object
+      properties:
+        acknowledged: { type: boolean, default: true }

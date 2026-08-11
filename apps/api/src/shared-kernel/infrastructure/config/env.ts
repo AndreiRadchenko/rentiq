@@ -18,6 +18,9 @@ const envSchema = z.object({
   ADMIN_EMAIL: z.string().email().default('admin@rentiq.dev'),
   ADMIN_PASSWORD: z.string().min(8).default('rentiq-admin-dev'),
   RENTIQ_DEV_TELEGRAM_SECRET: z.string().min(8).default('rentiq-dev-bot-secret'),
+  MASTER_KEY: z
+    .string()
+    .min(32, { message: 'MASTER_KEY must be at least 32 bytes (hex 64 chars or base64 44 chars) for AES-256-GCM encryption of per-tenant secrets' }),
 });
 
 export type Env = z.infer<typeof envSchema>;

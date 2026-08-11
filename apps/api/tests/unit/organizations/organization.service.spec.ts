@@ -8,6 +8,7 @@ import {
   FakePasswordHasher,
   makeOrganization,
 } from '../helpers/fakes';
+import { makeCryptoService } from '../helpers/locations-fakes';
 
 function buildService() {
   const organizationRepository = new FakeOrganizationRepository();
@@ -24,6 +25,7 @@ function buildService() {
     adminAccountService,
     eventBus,
     passwordHasher,
+    makeCryptoService(),
   );
   return { service, organizationRepository, adminAccountRepository, eventBus };
 }

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS "inventory_kits_locker_id_unique" ON "inventory_kits" ("locker_id");

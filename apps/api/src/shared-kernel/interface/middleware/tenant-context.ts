@@ -7,6 +7,7 @@ export interface TenantStore {
   locale?: string;
   sub?: string;
   tokenType?: string;
+  impersonatorSub?: string;
 }
 
 const asyncLocalStorage = new AsyncLocalStorage<TenantStore>();
@@ -31,6 +32,10 @@ export class TenantContext {
 
   static getTokenType(): string | undefined {
     return asyncLocalStorage.getStore()?.tokenType;
+  }
+
+  static getImpersonatorSub(): string | undefined {
+    return asyncLocalStorage.getStore()?.impersonatorSub;
   }
 
   static run(orgId: string | TenantStore, callback: () => unknown): unknown {

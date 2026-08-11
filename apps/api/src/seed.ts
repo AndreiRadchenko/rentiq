@@ -41,10 +41,28 @@ async function main() {
         supportedLocales: ['uk', 'en'],
         defaultLocale: 'uk',
       },
-      paymentCredsRef: { gateway: 'monobank', secretRef: '', enabled: false },
+      paymentCreds: {
+        mode: 'test',
+        testTokenEncrypted: '',
+        liveTokenEncrypted: '',
+        redirectUrl: '',
+        enabled: false,
+      },
+      paymentDetails: {
+        payerName: '',
+        iban: '',
+        edrpou: '',
+        purpose: '',
+      },
       telegramConfig: { botSecretHash, botUsername: 'rentiq_dev_bot' },
       maintenanceWindow: null,
-      checkboxConfig: { cashierProfileId: null, enabled: false },
+      checkboxConfig: {
+        mode: 'test',
+        licenseKeyEncrypted: '',
+        testTokenEncrypted: '',
+        liveTokenEncrypted: '',
+        enabled: false,
+      },
     });
     console.log('[seed] Organization "rentiq-dev" (slug=rentiq) created');
   }

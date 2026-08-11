@@ -8,6 +8,20 @@
       "when": 1786003333316,
       "tag": "0000_eager_boomerang",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1786306138175,
+      "tag": "0001_handy_nightcrawler",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1786375723805,
+      "tag": "0002_lovely_the_professor",
+      "breakpoints": true
     }
   ]
 }

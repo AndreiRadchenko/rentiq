@@ -60,6 +60,20 @@ deletion request is received (right to erasure), financial and fiscal records mu
 for the legally required period; personally identifying fields (name, phone) may be anonymized
 after that period. `[OPEN: confirm Ukrainian data-retention law minimum period]`
 
+### BR-01.7 Cross-Tenant Support Access (Impersonation)
+Only a `SUPER_ADMIN` may act on behalf of another organization. Support impersonation is
+signalled per-request by the `x-org-id` HTTP header:
+- If `x-org-id` is absent, the request runs in the actor's own tenant context (the `org_id`
+  from the access token, if any).
+- If `x-org-id` is present, it is honored **only** when the authenticated actor has role
+  `SUPER_ADMIN`. Any other role sending `x-org-id` is rejected with `403 IMPERSONATION_FORBIDDEN`.
+- The target organization must exist (`404 ORG_NOT_FOUND`) and be `ACTIVE` (`403 ORG_SUSPENDED`).
+- Every impersonated request is written to the audit log with action `ImpersonationActivated`
+  and both the impersonator (`sub`) and the target organization recorded. The impersonated
+  identity is never mixed into the target tenant's own audit trail.
+- Impersonation does not change the actor's role; a `SUPER_ADMIN` acting on a tenant's data
+  keeps role `SUPER_ADMIN`, which is broader than any tenant-local role.
+
 ---
 
 ## BR-02 — Organizations
@@ -135,9 +149,11 @@ Admins can independently control `isActive` and `isVisibleToClients` on a statio
 These two flags are independent controls, not a single on/off toggle.
 
 ### BR-03.7 HA Token Storage
-Home Assistant connection tokens for each station are stored as references to a secret store,
-never as raw strings in the database. Each station has its own HA URL and token — there is no
-global HA config.
+Home Assistant connection tokens for each station are stored encrypted in the database
+(AES-256-GCM envelope encryption via `CryptoService`), never as raw plaintext. Each station
+has its own HA URL and token — there is no global HA config. The token is decrypted only at
+the moment of use (when `HomeAssistantGateway` issues a command) and never appears in API
+responses (masked to last 4 chars). A per-station HA webhook secret is stored the same way.
 
 ---
 

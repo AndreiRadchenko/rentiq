@@ -6,13 +6,14 @@ import { EventBusModule } from './infrastructure/event-bus/event-bus.module';
 import { SharedI18nModule } from './infrastructure/i18n/i18n.module';
 import { JwtModule } from './infrastructure/jwt/jwt.module';
 import { PasswordHasher } from './infrastructure/crypto/password-hasher';
+import { CryptoService } from './infrastructure/crypto/crypto.service';
 import { DrizzleHealthIndicator } from './infrastructure/health/drizzle-health.indicator';
 import { RedisHealthIndicator } from './infrastructure/health/redis-health.indicator';
 import { HealthController } from './interface/health/health.controller';
-import { TenantMiddleware } from './interface/middleware/tenant.middleware';
 import { JwtAuthMiddleware } from './interface/middleware/jwt-auth.middleware';
 import { I18nBridgeMiddleware } from './infrastructure/i18n/i18n-bridge.middleware';
 import { ApiErrorFilter } from './interface/filters/api-error.filter';
+import { AuditableLogger } from './infrastructure/audit/auditable-action.decorator';
 import { APP_FILTER } from '@nestjs/core';
 
 @Global()
@@ -34,7 +35,9 @@ import { APP_FILTER } from '@nestjs/core';
     DrizzleHealthIndicator,
     RedisHealthIndicator,
     PasswordHasher,
+    CryptoService,
     I18nBridgeMiddleware,
+    AuditableLogger,
   ],
   exports: [
     ConfigModule,
@@ -43,12 +46,14 @@ import { APP_FILTER } from '@nestjs/core';
     SharedI18nModule,
     JwtModule,
     PasswordHasher,
+    CryptoService,
+    AuditableLogger,
   ],
 })
 export class SharedKernelModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer
-      .apply(TenantMiddleware, JwtAuthMiddleware, I18nBridgeMiddleware)
+      .apply(JwtAuthMiddleware, I18nBridgeMiddleware)
       .forRoutes('*');
   }
 }

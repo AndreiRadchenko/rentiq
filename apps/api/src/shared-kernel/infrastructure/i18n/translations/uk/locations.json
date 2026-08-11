@@ -1,0 +1,14 @@
+{
+  "station_name_required": "Назва станції обов'язкова",
+  "locker_name_required": "Назва шафи обов'язкова",
+  "ha_url_invalid": "Невірна адреса Home Assistant",
+  "token_ref_empty": "Посилання на токен порожнє",
+  "autolock_invalid": "Затримка автозакриття має бути додатним числом",
+  "station_not_found": "Станцію не знайдено",
+  "locker_not_found": "Шафу не знайдено",
+  "locker_station_offline": "Станція шафи офлайн",
+  "locker_open_failed": "Не вдалося відкрити шафу",
+  "locker_close_failed": "Не вдалося закрити шафу",
+  "kit_not_found": "Комплект не знайдено",
+  "webhook_secret_invalid": "Невірний секрет вебхука"
+}
