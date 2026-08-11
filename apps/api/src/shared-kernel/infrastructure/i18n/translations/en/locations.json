@@ -1,0 +1,14 @@
+{
+  "station_name_required": "Station name is required",
+  "locker_name_required": "Locker name is required",
+  "ha_url_invalid": "Invalid Home Assistant URL",
+  "token_ref_empty": "Token reference is empty",
+  "autolock_invalid": "Auto-lock delay must be a positive integer",
+  "station_not_found": "Station not found",
+  "locker_not_found": "Locker not found",
+  "locker_station_offline": "Locker station is offline",
+  "locker_open_failed": "Failed to open locker",
+  "locker_close_failed": "Failed to close locker",
+  "kit_not_found": "Inventory kit not found",
+  "webhook_secret_invalid": "Invalid webhook secret"
+}

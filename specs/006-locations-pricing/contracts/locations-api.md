@@ -51,20 +51,23 @@ Create a station. **Auth**: `ORG_ADMIN`. `Idempotency-Key` required. **Audit**:
   "name": "Poshtova Ploshcha",
   "address": "Kyiv, Poshtova Sq.",
   "haUrlOrIp": "http://10.0.0.42:8123",
-  "haTokenRef": "stations/poshtova/token",
+  "haToken": "eyJ...HA long-lived token (plaintext input, encrypted on server)",
+  "haWebhookSecret": "shared-secret-for-ha-webhook",
   "autoLockDelaySec": 30,
   "sortOrder": 0
 }
 ```
 **Defaults applied server-side**: `isActive=true`, `isVisibleToClients=false`,
-`workingStatus='WORKING'`, `healthStatus='UNKNOWN'`.
+`workingStatus='WORKING'`, `healthStatus='UNKNOWN'`. The `haToken` and `haWebhookSecret`
+are encrypted (AES-256-GCM) before persistence; the plaintext never appears in DB or API
+responses (masked to `****xxxx` in GET responses).
 
 **201 Response**: the created station (full admin view, includes `healthStatus`,
-`lastHealthCheckAt`).
+`lastHealthCheckAt`; `haToken` and `haWebhookSecret` are masked).
 
 **422 Errors**:
 - `STATION_AUTOLOCK_INVALID` — `autoLockDelaySec <= 0`.
-- `STATION_TOKEN_REF_EMPTY` — `haTokenRef` missing.
+- `STATION_TOKEN_REF_EMPTY` — `haToken` missing.
 - `STATION_HA_URL_INVALID` — `haUrlOrIp` not a valid URL/IP.
 
 ### `GET /api/v1/stations/:id`
@@ -72,7 +75,7 @@ Fetch one station (admin view). **Auth**: admin JWT.
 
 ### `PATCH /api/v1/stations/:id`
 Update mutable fields: `name`, `address`, `isActive`, `isVisibleToClients`,
-`workingStatus`, `autoLockDelaySec`, `haUrlOrIp`, `haTokenRef`, `sortOrder`.
+`workingStatus`, `autoLockDelaySec`, `haUrlOrIp`, `haToken`, `sortOrder`.
 **Auth**: `ORG_ADMIN`. **Audit**: `@AuditableAction("StationUpdated")`. Independent
 `isActive` / `isVisibleToClients` toggles (FR-004). Setting `workingStatus=
 MAINTENANCE` removes lockers from bookability without touching active/visible (FR-033).
@@ -154,11 +157,11 @@ Soft-retire: set `locker_id = null` (the kit row is retained for audit). **Auth*
 ## HA Door-Events Webhook
 
 ### `POST /api/v1/webhooks/ha/door-events`
-**Auth**: shared-secret header (`X-HA-Webhook-Secret`) validated against the org's
-configured value (per-station in v1). **Not** JWT-authenticated — HA is an external
-system. **Idempotent** on `(lockerId, eventTimestamp)`.
+**Auth**: shared-secret header (`X-HA-Webhook-Secret`) validated against the station's
+decrypted `ha_webhook_secret_encrypted`. **Not** JWT-authenticated — HA is an external
+system; the org is resolved from the station. **Idempotent** on `(lockerId, eventTimestamp)`.
 
-**Request** (from HA webhook):
+**Request** (from HA rest_command):
 ```json
 {
   "lockerId": "uuid",
@@ -166,17 +169,22 @@ system. **Idempotent** on `(lockerId, eventTimestamp)`.
   "eventTimestamp": "2026-08-09T12:34:56Z"
 }
 ```
+`doorState` and `eventTimestamp` are **optional**: an omitted `doorState` is **not**
+treated as `OPEN` — it falls to the "unknown state, logged for admin awareness" branch;
+an omitted `eventTimestamp` defaults to server now.
+
 **Behavior**:
 - `doorState=OPEN` + no active/pickup-ready rental → publish
-  `UnauthorizedDoorOpenDetected(lockerId, stationId)` (FR-016/017). MAINTENANCE mode
-  does not suppress (FR-017).
+  `UnauthorizedDoorOpenDetected(lockerId, stationId)` (FR-016/017) and log a `warn`.
+  MAINTENANCE mode does not suppress (FR-017).
 - `doorState=OPEN` + active/pickup-ready rental → publish `LockerOpened` (FR-018).
 - `doorState=CLOSED` → publish `LockerClosed`; cancel pending auto-relock job.
-- `doorState=UNKNOWN` → no unauthorized alert, logged for admin awareness (Error
-  Scenarios).
+- `doorState=UNKNOWN` (or omitted) → no unauthorized alert, logged for admin awareness
+  (Error Scenarios).
+- A `lockerId` that is missing → `404 LOCKER_NOT_FOUND`.
 
 **200 Response**: `{ "acknowledged": true }`. Errors: `LOCKER_NOT_FOUND` (404),
-`WEBHOOK_SECRET_INVALID` (401).
+`STATION_NOT_FOUND` (404), `WEBHOOK_SECRET_INVALID` (401).
 
 ## Authorization Matrix
 
@@ -188,4 +196,4 @@ system. **Idempotent** on `(lockerId, eventTimestamp)`.
 | `PATCH /stations/:id` | ✓ | ✓ | — | — |
 | `POST /lockers/:id/open` (admin) | ✓ | ✓ | ✓ (assigned) | — |
 | `POST /lockers/:id/open` (rental) | — | — | — | via `/rentals/:id/open-locker` (Phase 5) |
-| `POST /webhooks/ha/door-events` | shared secret | shared secret | shared secret | shared secret |
+| `POST /api/v1/webhooks/ha/door-events` | shared secret | shared secret | shared secret | shared secret |

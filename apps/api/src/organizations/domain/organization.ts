@@ -6,10 +6,19 @@ export interface BrandingConfig {
   defaultLocale: string;
 }
 
-export interface PaymentGatewayCredentialsRef {
-  gateway: string;
-  secretRef: string;
+export interface PaymentCreds {
+  mode: 'test' | 'live';
+  testTokenEncrypted: string;
+  liveTokenEncrypted: string;
+  redirectUrl: string;
   enabled: boolean;
+}
+
+export interface PaymentDetails {
+  payerName: string;
+  iban: string;
+  edrpou: string;
+  purpose: string;
 }
 
 export interface TelegramBotConfig {
@@ -24,7 +33,10 @@ export interface MaintenanceWindow {
 }
 
 export interface CheckboxConfig {
-  cashierProfileId: string | null;
+  mode: 'test' | 'live';
+  licenseKeyEncrypted: string;
+  testTokenEncrypted: string;
+  liveTokenEncrypted: string;
   enabled: boolean;
 }
 
@@ -36,7 +48,8 @@ export interface OrganizationState {
   slug: string;
   status: OrganizationStatus;
   branding: BrandingConfig;
-  paymentCredsRef: PaymentGatewayCredentialsRef;
+  paymentCreds: PaymentCreds;
+  paymentDetails: PaymentDetails;
   telegramConfig: TelegramBotConfig;
   maintenanceWindow: MaintenanceWindow | null;
   checkboxConfig: CheckboxConfig | null;
@@ -49,7 +62,8 @@ export interface CreateOrganizationInput {
   name: string;
   slug: string;
   branding: BrandingConfig;
-  paymentCredsRef: PaymentGatewayCredentialsRef;
+  paymentCreds: PaymentCreds;
+  paymentDetails: PaymentDetails;
   telegramConfig: TelegramBotConfig;
   maintenanceWindow?: MaintenanceWindow | null;
   checkboxConfig?: CheckboxConfig | null;
@@ -65,7 +79,8 @@ export class Organization {
       slug: input.slug,
       status: 'ACTIVE',
       branding: input.branding,
-      paymentCredsRef: input.paymentCredsRef,
+      paymentCreds: input.paymentCreds,
+      paymentDetails: input.paymentDetails,
       telegramConfig: input.telegramConfig,
       maintenanceWindow: input.maintenanceWindow ?? null,
       checkboxConfig: input.checkboxConfig ?? null,
@@ -100,6 +115,18 @@ export class Organization {
 
   updateBranding(branding: BrandingConfig): void {
     this.state.branding = branding;
+  }
+
+  updatePaymentCreds(creds: PaymentCreds): void {
+    this.state.paymentCreds = creds;
+  }
+
+  updatePaymentDetails(details: PaymentDetails): void {
+    this.state.paymentDetails = details;
+  }
+
+  updateCheckboxConfig(config: CheckboxConfig): void {
+    this.state.checkboxConfig = config;
   }
 
   suspend(): void {

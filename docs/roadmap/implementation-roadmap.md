@@ -132,8 +132,8 @@ organization. Renter registers and receives a renter JWT via the exchange endpoi
 - `locations` module: `Station`, `Locker`, `InventoryKit` aggregates. Drizzle repositories.
   `StationsService`, `LockersService`, `InventoryKitService`.
 - `HomeAssistantGateway` implementing `SmartLockGateway` port. Per-station HA connection
-  config resolved from `stations.ha_token_ref` (reads from env-vars in v1). Timeouts:
-  connect 3s, read 5s.
+  config from `stations.ha_token_encrypted` (decrypted at call time via `CryptoService`,
+  AES-256-GCM, `MASTER_KEY` in `.env`). Timeouts: connect 3s, read 5s.
 - `StationHealthChecker`: `@Cron('*/30 * * * * *')` pings each active station's HA. On
   status change → publishes `StationHealthChanged` → (notifications module stubs in Phase 6).
 - `LockerAccessService`: `openLocker(lockerId, actorType, actorId)`, `closeLocker(...)`.
@@ -220,9 +220,11 @@ test rental that exceeds paid duration.
 - `payments` module: `PaymentTransaction`, `FiscalReceipt` entities. All application
   services (see architecture §4.8).
 - `MonobankGateway`: `createInvoice`, `verifyWebhook` (ECDSA verification against cached
-  public key), `getStatus`. Per-org credentials from `organizations.payment_creds_ref`.
+  public key), `getStatus`. Per-org credentials from `organizations.payment_creds` (encrypted
+  tokens decrypted at call time via `CryptoService`).
 - `CheckboxGateway`: `createReceipt`, `openShift`, `closeShift`, `getReceiptStatus`.
-  Per-org config from `organizations.checkbox_config`. Test mode / sandbox URL switch.
+  Per-org config from `organizations.checkbox_config` (encrypted tokens decrypted at call
+  time). Test mode / sandbox URL switch.
 - `PaymentWebhookService`: `POST /api/v1/payments/webhook/monobank` — ECDSA verify →
   `SELECT ... FOR UPDATE` on payment row → idempotent status update → publish
   `PaymentSucceeded`/`PaymentFailed`/`PaymentExpired`.
@@ -425,6 +427,10 @@ last 30 days of rentals to CSV.
   - Webhook for org A's payment does not advance org B's rental.
 - Evaluate Postgres Row-Level Security policies — apply if the second org has contractual
   data isolation requirements.
+- **Cross-tenant support access (impersonation)**: `x-org-id` header honored only for
+  `SUPER_ADMIN`, org existence/ACTIVE validation, and audit tracing on every impersonated
+  request (ADR-014, BR-01.7). Verified: non-SUPER_ADMIN → 403, unknown org → 404,
+  suspended org → 403, SUPER_ADMIN → works.
 - Per-org Telegram bot tokens: confirm the `auth/telegram/exchange` endpoint correctly
   rejects a renter presenting org A's bot secret against an org B renter.
 

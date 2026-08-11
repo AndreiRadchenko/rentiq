@@ -28,6 +28,7 @@ describe('Config Validation', () => {
     process.env.MINIO_SECRET_KEY = 'minioadmin';
     process.env.MINIO_BUCKET = 'test';
     process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+    process.env.MASTER_KEY = 'a'.repeat(64);
 
     const mockExit = jest.spyOn(process, 'exit').mockImplementation(() => undefined as never);
     const mockConsoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -49,6 +50,7 @@ describe('Config Validation', () => {
     process.env.MINIO_SECRET_KEY = 'minioadmin';
     process.env.MINIO_BUCKET = 'test';
     process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+    process.env.MASTER_KEY = 'a'.repeat(64);
 
     const mockExit = jest.spyOn(process, 'exit').mockImplementation(() => undefined as never);
     const mockConsoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -72,6 +74,7 @@ describe('Config Validation', () => {
         MINIO_SECRET_KEY: 'minioadmin',
         MINIO_BUCKET: 'test',
         TELEGRAM_BOT_TOKEN: 'test-token',
+        MASTER_KEY: 'a'.repeat(64),
       }),
     };
 

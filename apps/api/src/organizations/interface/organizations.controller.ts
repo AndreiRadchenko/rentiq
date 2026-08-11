@@ -1,4 +1,4 @@
-import { Controller, Post, Patch, Body, Param, Req, UseGuards } from '@nestjs/common';
+import { Controller, Post, Patch, Get, Body, Param, Req, UseGuards } from '@nestjs/common';
 import { HttpStatus } from '@nestjs/common';
 import { JwtAuthGuard } from '../../shared-kernel/interface/guards/jwt-auth.guard';
 import { RolesGuard } from '../../shared-kernel/interface/guards/roles.guard';
@@ -6,14 +6,25 @@ import { Roles } from '../../shared-kernel/interface/guards/roles.decorator';
 import { AuthenticatedRequest } from '../../shared-kernel/interface/middleware/jwt-auth.middleware';
 import { ApiException } from '../../shared-kernel/interface/dto/api-exception';
 import { ErrorCode } from '../../shared-kernel/interface/dto/api-error';
+import { CryptoService } from '../../shared-kernel/infrastructure/crypto/crypto.service';
 import { OrganizationService } from '../application/organization.service';
+import { Organization } from '../domain/organization';
 import { CreateOrganizationRequest, CreateOrganizationResponse, OrganizationBrandingResponse } from './dto/create-organization.dto';
 import { UpdateBrandingRequest, MaintenanceWindowRequest, OrganizationConfigResponse, MaintenanceWindowResponse } from './dto/organization-config.dto';
+import {
+  UpdatePaymentCredsRequest,
+  UpdatePaymentDetailsRequest,
+  UpdateCheckboxConfigRequest,
+  OrganizationCredentialsResponse,
+} from './dto/credentials.dto';
 
 @Controller('v1/organizations')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class OrganizationsController {
-  constructor(private readonly organizationService: OrganizationService) {}
+  constructor(
+    private readonly organizationService: OrganizationService,
+    private readonly crypto: CryptoService,
+  ) {}
 
   @Post()
   @Roles('SUPER_ADMIN')
@@ -71,6 +82,84 @@ export class OrganizationsController {
       id: state.id,
       status: state.status,
       maintenanceWindow: this.toMaintenanceWindowResponse(state.maintenanceWindow),
+    };
+  }
+
+  @Patch(':id/payment-creds')
+  @Roles('SUPER_ADMIN', 'ORG_ADMIN')
+  async updatePaymentCreds(
+    @Param('id') id: string,
+    @Body() body: UpdatePaymentCredsRequest,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<OrganizationCredentialsResponse> {
+    this.requireOrgAccess(request, id);
+    const org = await this.organizationService.updatePaymentCreds(id, body);
+    return this.toCredentialsResponse(org);
+  }
+
+  @Patch(':id/payment-details')
+  @Roles('SUPER_ADMIN', 'ORG_ADMIN')
+  async updatePaymentDetails(
+    @Param('id') id: string,
+    @Body() body: UpdatePaymentDetailsRequest,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<OrganizationCredentialsResponse> {
+    this.requireOrgAccess(request, id);
+    const org = await this.organizationService.updatePaymentDetails(id, body);
+    return this.toCredentialsResponse(org);
+  }
+
+  @Patch(':id/checkbox-config')
+  @Roles('SUPER_ADMIN', 'ORG_ADMIN')
+  async updateCheckboxConfig(
+    @Param('id') id: string,
+    @Body() body: UpdateCheckboxConfigRequest,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<OrganizationCredentialsResponse> {
+    this.requireOrgAccess(request, id);
+    const org = await this.organizationService.updateCheckboxConfig(id, body);
+    return this.toCredentialsResponse(org);
+  }
+
+  @Get('id/:id/credentials')
+  async getCredentials(
+    @Param('id') id: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<OrganizationCredentialsResponse> {
+    this.requireOrgAccess(request, id);
+    const org = await this.organizationService.getActive(id);
+    return this.toCredentialsResponse(org);
+  }
+
+  private requireOrgAccess(request: AuthenticatedRequest, orgId: string): void {
+    if (request.auth?.role === 'ORG_ADMIN' && request.auth.orgId !== orgId) {
+      throw new ApiException(HttpStatus.FORBIDDEN, ErrorCode.FORBIDDEN, 'auth.forbidden');
+    }
+  }
+
+  private toCredentialsResponse(org: Organization): OrganizationCredentialsResponse {
+    const state = org.currentState;
+    const pc = state.paymentCreds;
+    const cc = state.checkboxConfig;
+    return {
+      id: state.id,
+      paymentCreds: {
+        mode: pc.mode,
+        testToken: pc.testTokenEncrypted ? this.crypto.mask(this.crypto.decrypt(pc.testTokenEncrypted)) : '',
+        liveToken: pc.liveTokenEncrypted ? this.crypto.mask(this.crypto.decrypt(pc.liveTokenEncrypted)) : '',
+        redirectUrl: pc.redirectUrl,
+        enabled: pc.enabled,
+      },
+      paymentDetails: state.paymentDetails,
+      checkboxConfig: cc
+        ? {
+            mode: cc.mode,
+            licenseKey: cc.licenseKeyEncrypted ? this.crypto.mask(this.crypto.decrypt(cc.licenseKeyEncrypted)) : '',
+            testToken: cc.testTokenEncrypted ? this.crypto.mask(this.crypto.decrypt(cc.testTokenEncrypted)) : '',
+            liveToken: cc.liveTokenEncrypted ? this.crypto.mask(this.crypto.decrypt(cc.liveTokenEncrypted)) : '',
+            enabled: cc.enabled,
+          }
+        : null,
     };
   }
 

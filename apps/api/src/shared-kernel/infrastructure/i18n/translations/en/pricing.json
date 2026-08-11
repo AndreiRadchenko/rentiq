@@ -1,0 +1,8 @@
+{
+  "duration_invalid": "Duration must be a positive integer",
+  "price_invalid": "Price must be a non-negative integer",
+  "day_type_invalid": "Invalid day type",
+  "duplicate_tariff": "A tariff with this key already exists",
+  "tariff_not_found": "Tariff not found",
+  "quote_missing_params": "Quote parameters are missing"
+}

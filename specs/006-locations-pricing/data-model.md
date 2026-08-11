@@ -22,7 +22,8 @@ All tables carry `org_id` (Constitution Principle VI). Money is integer minor un
 | `is_visible_to_clients` | boolean | NOT NULL DEFAULT false | admin toggle (FR-004); default false = soft-launch |
 | `sort_order` | integer | NOT NULL DEFAULT 0 | |
 | `ha_url_or_ip` | varchar(255) | NOT NULL | part of `HaConnectionConfig` VO |
-| `ha_token_ref` | varchar(255) | NOT NULL | opaque `SecretStore` reference (FR-019/020) |
+| `ha_token_encrypted` | text | NOT NULL | AES-256-GCM encrypted HA long-lived token (decrypted at call time via `CryptoService`; `MASTER_KEY` in `.env`) |
+| `ha_webhook_secret_encrypted` | text | NOT NULL | AES-256-GCM encrypted per-station webhook secret (validated on `POST /api/v1/webhooks/ha/door-events`) |
 | `auto_lock_delay_sec` | integer | NOT NULL DEFAULT 30 | per-station; CHECK > 0 (FR-014, Clarification 2026-08-09) |
 | `health_status` | enum `station_health_status` (`ONLINE`, `OFFLINE`, `UNKNOWN`) | NOT NULL DEFAULT `UNKNOWN` | FR-011 |
 | `last_health_check_at` | timestamptz | nullable | FR-011 |
@@ -32,7 +33,9 @@ All tables carry `org_id` (Constitution Principle VI). Money is integer minor un
 **Validation rules**:
 - `auto_lock_delay_sec > 0` (CHECK constraint) — zero/negative rejected at config time
   (Edge Case "Auto-lock delay misconfigured").
-- `ha_token_ref` is opaque to `locations`; stored as-is, never decrypted by this module.
+- `ha_token_encrypted` is encrypted by `CryptoService.encrypt()` before persistence and
+  decrypted by `CryptoService.decrypt()` on read in the repository. The domain aggregate
+  holds plaintext in memory only. API responses mask it (last 4 chars).
 
 **State transitions** (`health_status`):
 ```
@@ -92,6 +95,68 @@ Phase 3 implements the **release** transitions (`→ AVAILABLE` on `RentalFinish
 transitions are wired in Phase 5 (Rentals); the aggregate methods exist now with
 `@phase5`-tagged tests skipped.
 
+## HA Webhook: Door Events (wire contract)
+
+Home Assistant pushes door events to the API via an HA `rest_command` on door open, so
+the backend can detect unauthorized opens and track locker lifecycle. The webhook is
+**public** (no JWT, no `TenantContext`) — the org is resolved from the station.
+
+**Endpoint**: `POST /api/v1/webhooks/ha/door-events`
+
+**Auth**: header `X-HA-Webhook-Secret: <station ha_webhook_secret>` — validated against
+the station's decrypted `ha_webhook_secret_encrypted`. Missing/mismatched secret →
+`401 WEBHOOK_SECRET_INVALID`.
+
+**Request body** (HA rest_command payload; the backend resolves the locker from
+`stationId` + `doorSensor` — `doorSensor` is the HA entity id of the door sensor,
+matched against `lockers.ha_door_sensor_entity_id` within that station):
+
+```json
+{
+  "stationId": "809aa485-d42f-43e2-9c09-ddd5362b518e",
+  "doorSensor": "input_boolean.door_sensor1",
+  "doorState": "OPEN"
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `stationId` | uuid | yes | `stations.id`; org resolved from the station (org-agnostic lookup) |
+| `doorSensor` | string | yes | HA entity id; must match a non-deleted locker's `ha_door_sensor_entity_id` under `stationId` |
+| `doorState` | enum | no | optional; when omitted the event is logged as unknown — **no state implied** |
+| `eventTimestamp` | ISO-8601 | no | optional; accepted for HA-retry compatibility, defaults to server now |
+
+**Semantics**: a POST carries a door event with an explicit `doorState`. `doorState`
+omitted is **not** treated as `OPEN` — it falls through to the "unknown state" branch
+(logged for admin awareness). Idempotent on `(stationId, doorSensor, eventTimestamp)` —
+the handler ignores duplicate deliveries (HA retries).
+
+**Mapping** (in `DoorEventHandler`; `lockerId` below is the resolved locker's id):
+
+| `doorState` | Condition | Result |
+|---|---|---|
+| `OPEN` | `locker.current_rental_id IS NULL` | log `warn` + publish `UnauthorizedDoorOpenDetected(lockerId, stationId, orgId, ts)` |
+| `OPEN` | `locker.current_rental_id IS NOT NULL` | publish `LockerOpened(lockerId, stationId, orgId, SYSTEM, rentalId, ts)` |
+| `CLOSED` | any | publish `LockerClosed(lockerId, stationId, orgId, SYSTEM, rentalId?, ts)` |
+| `UNKNOWN` / omitted | any | no alert, logged for admin awareness |
+
+**Response**: `200 { "acknowledged": true }`.
+
+**Errors**: `404 LOCKER_NOT_FOUND` | `404 STATION_NOT_FOUND` | `401 WEBHOOK_SECRET_INVALID`.
+
+**HA config reference**:
+
+```yaml
+rest_command:
+  notify_door_open:
+    url: "https://stage-server.radchenko.uk/api/v1/webhooks/ha/door-events"
+    method: POST
+    headers:
+      X-HA-Webhook-Secret: "<station ha_webhook_secret>"
+      Content-Type: application/json
+    payload: '{"stationId": "<station uuid>", "doorSensor": "{{ door_sensor }}", "doorState": "OPEN"}'
+```
+
 ## Entity: InventoryKit (`locations` module)
 
 **Table**: `inventory_kits`
@@ -147,9 +212,11 @@ index (FR-026); the repository maps the constraint violation to a
 
 - `Money(amountMinor: number, currency: string)` — used for `tariffs.price`.
 - `OrgId`, `EntityId<T>` — typed IDs.
-- `HaConnectionConfig` VO (new in `locations` domain): `{ urlOrIp: string, tokenRef:
-  SecretRef, autoLockDelaySeconds: number }`. Equality by value; validated on
-  construction (`autoLockDelaySeconds > 0`, `urlOrIp` non-empty).
+- `HaConnectionConfig` VO (new in `locations` domain): `{ urlOrIp: string, token: string,
+  autoLockDelaySeconds: number }`. Equality by value; validated on construction
+  (`autoLockDelaySeconds > 0`, `urlOrIp` non-empty, `token` non-empty). The `token` field
+  holds plaintext in memory (decrypted from `ha_token_encrypted` by the repository); it is
+  never serialized to API responses (masked in DTOs).
 
 ## Critical Indexes (from architecture §5.4)
 

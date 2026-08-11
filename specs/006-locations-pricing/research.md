@@ -10,9 +10,10 @@ CLARIFICATION]` markers remain after this file.
 
 **Decision**: One `HomeAssistantGateway` adapter instance is created per station, lazily
 cached by `stationId`, configured from the station's `HaConnectionConfig` VO
-(`ha_url_or_ip`, `ha_token_ref`, `auto_lock_delay_sec`). The raw token is resolved
-through the `SecretStore` port (owned by `organizations`) at the moment of use, never
-cached in the adapter beyond the lifetime of a single gateway call.
+(`ha_url_or_ip`, `ha_token`, `auto_lock_delay_sec`). The `ha_token` is the plaintext
+HA long-lived token (decrypted from `ha_token_encrypted` by `StationRepository` via
+`CryptoService`); the adapter uses it for HA REST calls. The plaintext exists only in
+memory — never persisted as plaintext in DB or serialized to API responses (masked).
 
 **Rationale**: ADR-001/ADR-002 keep the system a single process; a small per-station
 gateway pool (≤50 stations/org in v1) is trivially cheap and isolates per-station
@@ -74,28 +75,32 @@ publishing prevents alert floods (Edge Case "Health check flapping").
 - Exponential backoff on failures before flagging — rejected: adds complexity without
   clear benefit over a fixed 2-fail window.
 
-## R4 — Secret store abstraction boundary
+## R4 — Encrypted credential storage (CryptoService)
 
-**Decision**: The `SecretStore` port (methods `store(secret): SecretRef`,
-`resolve(ref): Secret`) is owned by the `organizations` module and exposed as a public
-application-service interface. `locations` domain/application code holds only an opaque
-`tokenRef: string`; only the `HomeAssistantGateway` adapter (infrastructure) calls
-`SecretStore.resolve(tokenRef)` at the moment of issuing a gateway command. The raw
-token never enters `locations` domain, application, or persistence layers (FR-019/020/
-021). In v1 the concrete `SecretStore` adapter reads from environment variables (per
-the roadmap Phase 3 deliverable: "reads from env-vars in v1"); a real vault adapter is a
-later-phase swap behind the same port.
+**Decision**: Per-tenant secrets (HA tokens, HA webhook secrets, Monobank tokens, Checkbox
+license + tokens) are stored **encrypted** in the database using AES-256-GCM envelope
+encryption. The `CryptoService` (in `shared-kernel/infrastructure/crypto/`) provides
+`encrypt(plaintext)` and `decrypt(ciphertext)` methods, using a single `MASTER_KEY` (32
+bytes, hex or base64) from `.env`. The `StationRepository` encrypts `haToken` +
+`haWebhookSecret` on `save()` and decrypts on read; the `OrganizationRepository` does the
+same for `payment_creds` and `checkbox_config` token fields. The domain aggregate holds
+plaintext in memory only (never serialized to API responses — masked in DTOs to `****xxxx`).
 
-**Rationale**: Constitution Principle II (external systems behind named ports) and
-Principle X (secret hygiene — raw tokens never in logs/audit/API). Keeping the port in
-`organizations` co-locates it with the org-level credential refs it also manages
-(payment, checkbox, telegram).
+**Rationale**: Constitution Principle X (secret hygiene — raw tokens never in DB, logs,
+audit, or API). Envelope encryption with a single `MASTER_KEY` scales to 50+ stations
+without env-var-per-secret sprawl. DB backups contain ciphertext. Future migration to
+HashiCorp Vault replaces the `CryptoService` adapter; the encrypted columns become
+references — no schema migration needed.
 
 **Alternatives**:
-- `locations` owns its own `SecretStore` port — rejected: duplicates the abstraction;
-  `organizations` already needs it for payment/checkbox creds.
-- Pass the resolved token into the domain layer — rejected: violates Principle II and
-  secret hygiene.
+- `SecretStore` port with env-var references (original architecture §9.5 design) — rejected:
+  doesn't scale past ~5 stations (one env-var per station token); env-var sprawl; rotation
+  requires `.env` edits + restart.
+- `locations` owns its own `CryptoService` — rejected: duplicates the abstraction;
+  `organizations` also needs it for payment/checkbox creds.
+- Pass the encrypted value into the domain layer — rejected: domain layer should hold
+  plaintext (it needs the token to construct `HaConnectionConfig`); encryption is a
+  persistence concern, belongs in the repository.
 
 ## R5 — Day type resolution
 
@@ -168,7 +173,7 @@ aggregate; Phase 5 owns the reservation path because it owns the rental aggregat
 
 **Decision**: The HA door-events webhook (`POST /api/v1/webhooks/ha/door-events`,
 shared-secret header) is the sole ingress for door state. The webhook handler maps an
-incoming `door_state = OPEN` event for a locker to: if `locker.current_rental_id` is
+incoming `doorState = OPEN` event for a locker to: if `locker.current_rental_id` is
 null AND no pickup-ready rental exists for that locker → publish
 `UnauthorizedDoorOpenDetected(lockerId, stationId)` and let `notifications`/`audit-log`
 subscribers handle the alert (FR-016/017). If there is an active or pickup-ready rental,

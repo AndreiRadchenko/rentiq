@@ -3,10 +3,11 @@ import { ORGANIZATION_REPOSITORY, OrganizationRepository } from './ports/organiz
 import { AdminAccountService, AdminAccountSummary } from '../../iam/application/admin-account/admin-account.service';
 import { EVENT_BUS, EventBus } from '../../shared-kernel/application/ports/event-bus';
 import { PasswordHasher } from '../../shared-kernel/infrastructure/crypto/password-hasher';
+import { CryptoService } from '../../shared-kernel/infrastructure/crypto/crypto.service';
 import { EntityId } from '../../shared-kernel/domain/value-objects/entity-id';
 import { ApiException } from '../../shared-kernel/interface/dto/api-exception';
 import { ErrorCode } from '../../shared-kernel/interface/dto/api-error';
-import { Organization, BrandingConfig, TelegramBotConfig, MaintenanceWindow } from '../domain/organization';
+import { Organization, BrandingConfig, TelegramBotConfig, MaintenanceWindow, PaymentCreds, PaymentDetails, CheckboxConfig } from '../domain/organization';
 import { OrganizationCreated } from '../infrastructure/events/organization-created.event';
 import { OrganizationSuspended } from '../infrastructure/events/organization-suspended.event';
 import { OrganizationBrandingChanged } from '../infrastructure/events/organization-branding-changed.event';
@@ -61,6 +62,7 @@ export class OrganizationService {
     private readonly adminAccountService: AdminAccountService,
     @Inject(EVENT_BUS) private readonly eventBus: EventBus,
     private readonly passwordHasher: PasswordHasher,
+    private readonly crypto: CryptoService,
   ) {}
 
   async create(input: CreateOrganizationInput): Promise<CreateOrganizationResult> {
@@ -94,14 +96,28 @@ export class OrganizationService {
       name,
       slug,
       branding,
-      paymentCredsRef: {
-        gateway: '',
-        secretRef: '',
+      paymentCreds: {
+        mode: 'test',
+        testTokenEncrypted: '',
+        liveTokenEncrypted: '',
+        redirectUrl: '',
         enabled: false,
+      },
+      paymentDetails: {
+        payerName: '',
+        iban: '',
+        edrpou: '',
+        purpose: '',
       },
       telegramConfig,
       maintenanceWindow: null,
-      checkboxConfig: null,
+      checkboxConfig: {
+        mode: 'test',
+        licenseKeyEncrypted: '',
+        testTokenEncrypted: '',
+        liveTokenEncrypted: '',
+        enabled: false,
+      },
     });
 
     await this.organizationRepository.save(organization);
@@ -179,7 +195,83 @@ export class OrganizationService {
     return organization ? organization.id : null;
   }
 
-  private async getActive(orgId: string): Promise<Organization> {
+  async updatePaymentCreds(
+    orgId: string,
+    input: {
+      mode?: 'test' | 'live';
+      testToken?: string;
+      liveToken?: string;
+      redirectUrl?: string;
+      enabled?: boolean;
+    },
+  ): Promise<Organization> {
+    const organization = await this.getActive(orgId);
+    const current = organization.currentState.paymentCreds;
+    const creds: PaymentCreds = {
+      mode: input.mode ?? current.mode,
+      testTokenEncrypted: input.testToken !== undefined ? this.crypto.encrypt(input.testToken) : current.testTokenEncrypted,
+      liveTokenEncrypted: input.liveToken !== undefined ? this.crypto.encrypt(input.liveToken) : current.liveTokenEncrypted,
+      redirectUrl: input.redirectUrl ?? current.redirectUrl,
+      enabled: input.enabled ?? current.enabled,
+    };
+    organization.updatePaymentCreds(creds);
+    await this.organizationRepository.save(organization);
+    return organization;
+  }
+
+  async updatePaymentDetails(
+    orgId: string,
+    input: {
+      payerName?: string;
+      iban?: string;
+      edrpou?: string;
+      purpose?: string;
+    },
+  ): Promise<Organization> {
+    const organization = await this.getActive(orgId);
+    const current = organization.currentState.paymentDetails;
+    const details: PaymentDetails = {
+      payerName: input.payerName ?? current.payerName,
+      iban: input.iban ?? current.iban,
+      edrpou: input.edrpou ?? current.edrpou,
+      purpose: input.purpose ?? current.purpose,
+    };
+    organization.updatePaymentDetails(details);
+    await this.organizationRepository.save(organization);
+    return organization;
+  }
+
+  async updateCheckboxConfig(
+    orgId: string,
+    input: {
+      mode?: 'test' | 'live';
+      licenseKey?: string;
+      testToken?: string;
+      liveToken?: string;
+      enabled?: boolean;
+    },
+  ): Promise<Organization> {
+    const organization = await this.getActive(orgId);
+    const current = organization.currentState.checkboxConfig ?? {
+      mode: 'test' as const,
+      licenseKeyEncrypted: '',
+      testTokenEncrypted: '',
+      liveTokenEncrypted: '',
+      enabled: false,
+    };
+    const config: CheckboxConfig = {
+      mode: input.mode ?? current.mode,
+      licenseKeyEncrypted: input.licenseKey !== undefined ? this.crypto.encrypt(input.licenseKey) : current.licenseKeyEncrypted,
+      testTokenEncrypted: input.testToken !== undefined ? this.crypto.encrypt(input.testToken) : current.testTokenEncrypted,
+      liveTokenEncrypted: input.liveToken !== undefined ? this.crypto.encrypt(input.liveToken) : current.liveTokenEncrypted,
+      enabled: input.enabled ?? current.enabled,
+    };
+    organization.updateCheckboxConfig(config);
+    await this.organizationRepository.save(organization);
+    return organization;
+  }
+
+  async getActive(orgId: string): Promise<Organization> {
     const organization = await this.organizationRepository.findById(orgId);
     if (!organization) {
       throw new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND, 'organizations.org_not_found');

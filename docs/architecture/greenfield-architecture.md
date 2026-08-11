@@ -303,6 +303,31 @@ and duplicate processing risk.
 
 ---
 
+### ADR-014: Impersonation Middleware (Cross-Tenant Support Access)
+
+**Decision**: Cross-tenant support access is implemented as a per-request `x-org-id` HTTP
+header, enforced by an `ImpersonationMiddleware` registered in the **Organizations module**
+(which owns `ORGANIZATION_REPOSITORY`). It runs after `JwtAuthMiddleware` in the global
+middleware chain (module import order: `SharedKernel` → `Organizations`), so it can read the
+verified `request.auth`.
+
+The middleware enforces all of BR-01.7:
+- `x-org-id` present + actor role `SUPER_ADMIN` → re-runs `TenantContext.run` with
+  `orgId = <target>` plus `impersonatorSub = <actor sub>` (nested AsyncLocalStorage context,
+  so the impersonated org wins downstream; the outer JWT-derived context is restored after).
+- `x-org-id` present + any other role → `403 IMPERSONATION_FORBIDDEN`.
+- Target org must exist (`404 ORG_NOT_FOUND`) and be `ACTIVE` (`403 ORG_SUSPENDED`).
+- Every impersonated request emits an `ImpersonationActivated` audit record via the global
+  `AuditableLogger`, capturing the impersonator `sub`, the target `orgId`, method, and path.
+
+The naive `TenantMiddleware` (which trusted `x-org-id` from any client) is removed; the
+`orgId` for authenticated requests comes solely from the verified JWT payload. `TenantStore`
+gains `impersonatorSub` so downstream code can distinguish a super-admin acting on behalf of a
+tenant from that tenant's own operations. `[OPEN: decide whether non-GET impersonated requests
+on sensitive resources need a confirmation step]`
+
+---
+
 ## 4. Module Catalog
 
 ### 4.1 Dependency Graph
@@ -372,7 +397,10 @@ Never contains business logic.
 **Aggregate `Organization`**:
 - id, name, slug (unique), status (`ACTIVE`|`SUSPENDED`), createdAt, deletedAt.
 - `BrandingConfig` VO: logoUrl, primaryColor, businessName, supportedLocales, defaultLocale.
-- `PaymentGatewayCredentialsRef` VO: reference keys into the secret store (never raw tokens).
+- `PaymentCreds` VO: encrypted Monobank test/live tokens (`testTokenEncrypted`,
+  `liveTokenEncrypted`), `mode` (test/live), `redirectUrl`, `enabled`. Decrypted at call time
+  via `CryptoService`.
+- `PaymentDetails` VO: plaintext business identity (payerName, iban, edrpou, purpose).
 - `TelegramBotConfig` VO: botTokenRef, webhookSecretRef.
 - `MaintenanceWindow` VO: startTime (`HH:MM`), endTime (`HH:MM`), timezone (default
   `Europe/Kyiv`). Null means no maintenance window configured.
@@ -388,7 +416,8 @@ getBySlug, getMaintenanceWindow).
 
 **Aggregate `Station`**:
 - id, orgId, name, address, workingStatus (`WORKING`|`MAINTENANCE`), isActive, isVisibleToClients,
-  sortOrder, haConnectionConfig (`HaConnectionConfig` VO: urlOrIp, tokenRef, autoLockDelaySeconds),
+  sortOrder, haConnectionConfig (`HaConnectionConfig` VO: urlOrIp, token, autoLockDelaySeconds),
+  haWebhookSecret,
   healthStatus (`ONLINE`|`OFFLINE`|`UNKNOWN`), lastHealthCheckAt.
 
 **Aggregate `Locker`**:
@@ -646,7 +675,8 @@ organizations(
   slug            varchar(100) unique not null,
   status          org_status not null default 'ACTIVE',
   branding        jsonb,              -- BrandingConfig VO
-  payment_creds_ref jsonb,            -- PaymentGatewayCredentialsRef VO
+  payment_creds jsonb,                 -- PaymentCreds VO (encrypted tokens)
+  payment_details jsonb,               -- PaymentDetails VO (plaintext business identity)
   telegram_config jsonb,              -- TelegramBotConfig VO
   maintenance_window_start time,      -- HH:MM, nullable = no window
   maintenance_window_end   time,
@@ -694,7 +724,8 @@ stations(
   is_visible_to_clients boolean not null default false,
   sort_order            integer not null default 0,
   ha_url_or_ip          varchar(255) not null,
-  ha_token_ref          varchar(255) not null,  -- secret store reference
+  ha_token_encrypted     text not null,         -- AES-256-GCM encrypted HA token
+  ha_webhook_secret_encrypted text not null,    -- AES-256-GCM encrypted webhook secret
   auto_lock_delay_sec   integer not null default 30,
   health_status         station_health_status not null default 'UNKNOWN',
   last_health_check_at  timestamptz,
@@ -1166,10 +1197,23 @@ malformed. No runtime `undefined` config values.
 
 ### 9.5 Secrets Management
 
-- v1: Secrets in `.env` files (never committed). References stored in DB (see `ha_token_ref`,
-  `payment_creds_ref`). The API resolves references to values from env-vars at runtime.
-- Future: HashiCorp Vault or AWS Secrets Manager. Reference format in DB is
-  `{provider}:{path}` so the secret store is swappable without a schema migration.
+- Per-tenant secrets (Monobank test/live tokens, Checkbox license key + test/live tokens, HA
+  long-lived tokens, HA webhook secrets) are stored **encrypted** in the database using
+  AES-256-GCM envelope encryption. The `CryptoService` (shared-kernel) encrypts on write and
+  decrypts on read in the repository layer. A single `MASTER_KEY` in `.env` (32 bytes, hex or
+  base64) is the only secret that lives outside the DB.
+- Encrypted columns: `organizations.payment_creds` (jsonb with `testTokenEncrypted`,
+  `liveTokenEncrypted`), `organizations.checkbox_config` (jsonb with `licenseKeyEncrypted`,
+  `testTokenEncrypted`, `liveTokenEncrypted`), `stations.ha_token_encrypted`,
+  `stations.ha_webhook_secret_encrypted`.
+- Plaintext business data (payer name, IBAN, EDRPOU, purpose) is stored separately in
+  `organizations.payment_details` (jsonb, not encrypted — it is org identity, not a credential).
+- API responses **mask** token fields (last 4 chars only, e.g. `****rGg`). Admins can SET a
+  new token value but never READ the full token via the API.
+- `MASTER_KEY` rotation: generate a new key, re-encrypt all secret columns (script TODO),
+  update `.env`. No schema migration needed.
+- Future: HashiCorp Vault or AWS Secrets Manager. The `CryptoService` interface would be
+  replaced by a Vault-backed adapter; the encrypted columns become references.
 
 ---
 
@@ -1182,8 +1226,9 @@ malformed. No runtime `undefined` config values.
 | Renter auth | Short-lived JWT minted only via `/auth/telegram/exchange`, gated by per-org bot service secret. A renter cannot obtain a token by guessing a Telegram ID. |
 | Webhook verification | Monobank: ECDSA signature verified against cached public key. HA door events: shared secret header. |
 | Tenant isolation | `TenantContext` propagates `orgId` to every repository call. All queries implicitly filter by `orgId`. |
+| Cross-tenant support access | `x-org-id` header honored only for `SUPER_ADMIN`; org existence + ACTIVE validated; every impersonated request audited (ADR-014, BR-01.7). |
 | Future hardening | Postgres Row-Level Security (RLS) policies once ≥2 real paying orgs are live. |
-| Secrets | No raw credentials in DB. `*_ref` fields point to env-var keys. |
+| Secrets | Per-tenant tokens encrypted in DB (AES-256-GCM via `CryptoService`); one `MASTER_KEY` in `.env`. API responses mask token fields. |
 | Media access | Pre-signed MinIO URLs (15-min TTL). Photos never accessible via guessable public URL. |
 | Audit trail | Every sensitive admin action captured via `@AuditableAction` interceptor. |
 

@@ -22,6 +22,37 @@ details belong in `tasks.md` (Phase 2 output). For contracts and data model, see
 
 ## Environment
 
+Yes on both counts. Verified against apps/api/src/shared-kernel/infrastructure/config/env.ts:26 — .env.stage has every required var (DATABASE_URL, REDIS_URL, MINIO_*, TELEGRAM_BOT_TOKEN, JWT_*, ADMIN_*, RENTIQ_DEV_TELEGRAM_SECRET, MASTER_KEY) and Postgres/Redis are up on ports 5433/6380.
+But you need db:migrate first: the stage DB has only 3 tables (admin_accounts, organizations, renters) and no drizzle_migrations tracking table, so migration 0001_handy_nightcrawler.sql (stations, lockers, inventory_kits, tariffs) has not been applied. Run it once before starting:
+
+```bash
+cd apps/api
+set -a && source ../../.env.stage && set +a
+pnpm db:migrate
+```
+
+pnpm seed is optional — seed data already exists (2 orgs, 2 admins) and seed.ts skips existing orgs, so it's idempotent/harmless.
+Note: the DATABASE_URL=... pnpm ... prefix in your quickstart snippet is redundant — DATABASE_URL is already in .env.stage.
+
+1. Bring the DB schema up to date
+# From repo root — point at your running stage Postgres
+cd apps/api
+DATABASE_URL=postgres://rentiq:<password>@localhost:5432/rentiq pnpm db:migrate
+DATABASE_URL=postgres://rentiq:<password>@localhost:5432/rentiq pnpm seed
+
+The migrate step applies 0001_youthful_post.sql (the new stations/lockers/inventory_kits/tariffs tables). The seed step creates the rentiq-dev org + a SUPER_ADMIN if not already present.
+
+2. Generate a JWT keypair (if you don't have one)
+openssl genrsa -out jwt-private.pem 2048
+openssl rsa -in jwt-private.pem -pubout -out jwt-public.pem
+
+Put the PEM contents (multi-line, quoted) into your .env as JWT_PRIVATE_KEY and JWT_PUBLIC_KEY. The .env.example shows the format.
+
+```bash
+cd apps/api
+set -a && source ../../.env.stage && set +a && npm run start:dev
+```
+
 ```bash
 cp .env.example .env   # ensure DATABASE_URL, REDIS_URL, JWT public key are set
 pnpm db:up             # docker compose up postgres + redis
@@ -36,9 +67,11 @@ assign lockers, configure tariffs." See [locations-api.md](./contracts/locations
 and [pricing-api.md](./contracts/pricing-api.md) for full request/response shapes.
 
 1. `POST /api/v1/auth/login` with the `ORG_ADMIN` email/password → save `JWT`.
-2. `POST /api/v1/stations` with `{ name, address, haUrlOrIp, haTokenRef, autoLockDelaySec:
-   30 }` → 201. Verify defaults: `isActive=true`, `isVisibleToClients=false`,
-   `workingStatus=WORKING`, `healthStatus=UNKNOWN`.
+2. `POST /api/v1/stations` with `{ name, address, haUrlOrIp, haToken, haWebhookSecret,
+   autoLockDelaySec: 30 }` → 201. The `haToken` and `haWebhookSecret` are encrypted
+   (AES-256-GCM) on the server; the response masks them (`****xxxx`). Verify defaults:
+   `isActive=true`, `isVisibleToClients=false`, `workingStatus=WORKING`,
+   `healthStatus=UNKNOWN`.
 3. `POST /api/v1/lockers` ×2 under that station → 201 each.
 4. `POST /api/v1/inventory-kits` ×2 (`{ stationId, name, kitType: "SUP_BOARD" }`).
 5. `PATCH /api/v1/lockers/:lockerId` `{ inventoryKitId: <kitId> }` to assign each kit.

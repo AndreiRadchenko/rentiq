@@ -57,7 +57,7 @@ layering inside each module.
   is the sole scoping source in repositories (Principle VI).
 - Domain layer has zero NestJS dependencies; controllers have no business logic
   (Principle I).
-- External systems (Home Assistant, secret store) only behind named ports; adapters live
+- External systems (Home Assistant) only behind named ports; adapters live
   in infrastructure (Principle II).
 - Cross-module side effects via `EventBus` only; no module reads another's tables
   (Principles IV, V).
@@ -75,7 +75,7 @@ per 60 s iterating all active stations; 1 reconciliation cron hourly + on startu
 | # | Principle | Status | Evidence |
 |---|---|---|---|
 | I | Modular Monolith + Clean Layering | PASS | `locations` and `pricing` are separate NestJS modules, each with `domain/` `application/` `infrastructure/` `interface/` layers. Domain layer has no NestJS imports. Controllers thin. |
-| II | Hexagonal Isolation via Named Ports | PASS | `SmartLockGateway` port owned by `locations` domain; `HomeAssistantGateway` + `MockSmartLockGateway` adapters live only in `infrastructure`. Secret store access via `SecretStore` port from `organizations`. |
+| II | Hexagonal Isolation via Named Ports | PASS | `SmartLockGateway` port owned by `locations` domain; `HomeAssistantGateway` + `MockSmartLockGateway` adapters live only in `infrastructure`. Per-tenant secrets encrypted via `CryptoService` (AES-256-GCM, `MASTER_KEY` in `.env`). |
 | III | Domain-Driven Modeling & Money Integrity | PASS | `Station`, `Locker`, `Tariff` aggregates; `InventoryKit` entity; `HaConnectionConfig`, `Money` VOs. Price stored as `price_minor` INTEGER + `currency`. `OvertimeCalculator` is a pure domain service. |
 | IV | Event-Driven Cross-Module Communication | PASS | `locations` publishes `StationCreated`, `StationVisibilityChanged`, `StationHealthChanged`, `LockerOpened`, `LockerClosed`, `UnauthorizedDoorOpenDetected`, `UnverifiedLockerFinish`. `notifications` (Phase 6) and `audit-log` subscribe — no direct calls. `pricing` publishes `TariffChanged`. |
 | V | Mechanically Enforced Module Boundaries | PASS | Nx `enforce-module-boundaries` lint rule fails the build if `locations` or `pricing` imports another module's `domain/` or `infrastructure/`, or queries another module's tables. |
@@ -145,7 +145,7 @@ apps/api/src/modules/
 │       ├── stations.controller.ts
 │       ├── lockers.controller.ts
 │       ├── inventory-kits.controller.ts
-│       ├── ha-door-events.controller.ts    # POST /webhooks/ha/door-events
+│       ├── ha-door-events.controller.ts    # POST /api/v1/webhooks/ha/door-events
 │       └── dto/
 └── pricing/
     ├── domain/
@@ -210,7 +210,8 @@ See `research.md`. Resolves the open technical unknowns:
   absolute-deadline, restart-safe per ADR-003).
 - Health-check debounce implementation (2-fail → OFFLINE, 1-success → ONLINE).
 - Secret store abstraction boundary (owned by `organizations`; `locations` receives
-  only an opaque `tokenRef` and resolves via the `SecretStore` port).
+  only the plaintext token in memory (decrypted from `ha_token_encrypted` by the
+  repository via `CryptoService`).
 - `OvertimeCalculator` scope boundary for Phase 3 (stubbed pure function; full spec
   resolved in the Overtime spec `05-rentals/07-overtime`).
 

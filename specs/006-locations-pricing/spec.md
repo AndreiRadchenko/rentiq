@@ -192,29 +192,30 @@ and locker.
 
 ---
 
-### User Story 6 - Secret-Store-Only Connectivity Credential Storage (Priority: P3)
+### User Story 6 - Encrypted Credential Storage (Priority: P3)
 
-Each station has its own controller URL and connection token. The token is stored only as a
-reference into a secret store, never as a raw string alongside station configuration.
-Administrators can rotate a token by updating the secret store and the reference, without
-the raw token ever being persisted in business data.
+Each station has its own controller URL and connection token. The token is stored encrypted
+in the database (AES-256-GCM via `CryptoService`), never as raw plaintext. Administrators
+can rotate a token by updating it via the API; the new value is encrypted on the server and
+the raw token never appears in API responses (masked to last 4 chars).
 
 **Why this priority**: Credential hygiene is a security baseline. Per-station token isolation
 limits blast radius if one station's token is compromised.
 
-**Independent Test**: Create a station and inspect its persisted configuration; the
-connection token is present only as an opaque reference, and the raw token is retrievable
-solely through the secret store, not from station configuration.
+**Independent Test**: Create a station and inspect the persisted DB row; `ha_token_encrypted`
+is ciphertext, not the raw token. The API response shows `haToken: "****xxxx"` (masked). The
+`HomeAssistantGateway` receives the decrypted token in memory only (via `StationRepository`).
 
 **Acceptance Scenarios**:
 
 1. **Given** a new station being created, **When** the admin provides a controller URL and
-   token, **Then** only the URL and a secret-store reference are persisted; the raw token is
-   not stored in station configuration.
-2. **Given** an existing station, **When** the admin rotates the token, **Then** a new
-   secret-store reference is stored and the old raw token is no longer used.
+   token, **Then** the URL is stored plaintext and the token is stored encrypted
+   (`ha_token_encrypted`); the raw token is not persisted as plaintext in the DB.
+2. **Given** an existing station, **When** the admin rotates the token via PATCH, **Then** a
+   new encrypted value is stored and the old token is no longer used.
 3. **Given** any station, **When** any component needs the token to communicate with the
-   controller, **Then** it is resolved exclusively through the secret store at use time.
+   controller, **Then** it is decrypted by the repository at read time and held in memory
+   only — never serialized to API responses or logs.
 
 ---
 
@@ -318,12 +319,14 @@ solely through the secret store, not from station configuration.
 
 #### Credential Storage
 
-- **FR-019**: Each station's controller connection token MUST be stored only as a reference
-  into a secret store, never as a raw string in station configuration (BR-03.7).
+- **FR-019**: Each station's controller connection token MUST be stored encrypted in the
+  database (AES-256-GCM via `CryptoService`), never as raw plaintext (BR-03.7). A single
+  `MASTER_KEY` in `.env` is the only secret outside the DB.
 - **FR-020**: Each station MUST have its own controller URL and token; there is no global
-  controller configuration (BR-03.7).
-- **FR-021**: The system MUST resolve the raw token from the secret store only at the moment
-  of use, never persist it in business data.
+  controller configuration (BR-03.7). Each station also has its own HA webhook secret.
+- **FR-021**: The system MUST decrypt the token only at the moment of use (when
+  `HomeAssistantGateway` issues a command), never persist the plaintext in business data or
+  API responses. API responses mask token fields to the last 4 characters.
 
 #### Pricing Structure
 
@@ -361,7 +364,7 @@ solely through the secret store, not from station configuration.
 - **Station**: A physical grouping of lockers belonging to one organization. Carries name,
   address, operational status (WORKING / MAINTENANCE), an independently-controlled active
   flag, an independently-controlled visible-to-clients flag, sort order, per-station
-  controller connection config (URL + secret-store token reference + auto-lock delay),
+   controller connection config (URL + encrypted token + webhook secret + auto-lock delay),
   health status (ONLINE / OFFLINE / UNKNOWN), and last-health-check timestamp.
 - **Locker**: An individual physical compartment within a station. Carries a name, a
   bookability status (AVAILABLE / RESERVED / AWAITING_PAYMENT / AWAITING_PICKUP / RENTED /
@@ -408,9 +411,9 @@ Where this specification and the business-rules doc conflict, the business-rules
    day (FR-016, FR-017).
 9. **No false unauthorized alert**: A door-open on a locker with an active or pickup-ready
    rental produces no unauthorized-open alert (FR-018).
-10. **Secret-store token**: Inspecting persisted station configuration reveals only a
-    reference, not the raw token; the raw token is resolvable only via the secret store
-    (FR-019, FR-021).
+10. **Encrypted token**: Inspecting the persisted DB row reveals only ciphertext
+    (`ha_token_encrypted`), not the raw token; the API response masks it (`****xxxx`);
+    the raw token is decrypted only in memory by the repository (FR-019, FR-021).
 11. **Fixed duration options**: The Renter is presented only with admin-configured duration
     options; free-form duration entry is impossible (FR-024).
 12. **Tariff uniqueness**: Attempting to create a duplicate tariff (same org, kit type, day
@@ -505,10 +508,11 @@ Where this specification and the business-rules doc conflict, the business-rules
 - The `locations` and `pricing` modules depend on `shared-kernel` and `organizations` (per
   the module dependency graph in `docs/architecture/greenfield-architecture.md` §4.1); those
   modules are assumed to exist and to provide `OrgId`, `TenantContext`, `Money`, and the
-  secret-store abstraction.
-- The secret store is an external capability (not specified here) that supports storing a
-  secret and returning an opaque reference, and resolving a reference back to the secret at
-  use time. Its concrete implementation is out of scope for this specification.
+  `CryptoService` (AES-256-GCM encryption, `MASTER_KEY` from `.env`).
+- Per-tenant secrets (HA tokens, Monobank/Checkbox tokens) are encrypted in the DB by
+  `CryptoService`; the `MASTER_KEY` is the only secret in `.env`. API responses mask token
+  fields. See `docs/architecture/greenfield-architecture.md` §9.5 for the full secrets
+  management design.
 - The `SmartLockGateway` port (read door state, unlock, lock, is-reachable) is owned by the
   `locations` module and implemented by a Home Assistant adapter in infrastructure; the
   protocol details are out of scope per the user's instruction. Only the port's behavioral

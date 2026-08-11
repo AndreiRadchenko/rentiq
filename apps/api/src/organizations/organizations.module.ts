@@ -1,9 +1,10 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module, forwardRef, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { IamModule } from '../iam/iam.module';
 import { ORGANIZATION_REPOSITORY } from './application/ports/organization.repository';
 import { OrganizationRepository } from './infrastructure/repositories/organization.repository';
 import { OrganizationService } from './application/organization.service';
 import { OrganizationsController } from './interface/organizations.controller';
+import { ImpersonationMiddleware } from './infrastructure/middleware/impersonation.middleware';
 
 @Module({
   imports: [forwardRef(() => IamModule)],
@@ -14,4 +15,8 @@ import { OrganizationsController } from './interface/organizations.controller';
   ],
   exports: [OrganizationService, ORGANIZATION_REPOSITORY],
 })
-export class OrganizationsModule {}
+export class OrganizationsModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(ImpersonationMiddleware).forRoutes('*');
+  }
+}

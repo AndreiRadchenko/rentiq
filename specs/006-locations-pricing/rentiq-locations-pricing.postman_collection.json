@@ -1,0 +1,2465 @@
+{
+  "info": {
+    "name": "RentIQ — Locations + Pricing (Phase 3)",
+    "_postman_id": "f3c4a5b6-0000-4000-8000-rentiq006-0003",
+    "description": "Validation scenarios 1–7 from specs/006-locations-pricing/quickstart.md plus the Cross-Tenant Support Access (Impersonation) scenarios from specs/007-cross-tenant-support-access/. Prereqs: app running on :3002 (stage, .env.stage), migrations applied (stations/lockers/inventory_kits/tariffs tables), seed run (org slug `rentiq`, SUPER_ADMIN admin@rentiq.dev/rentiq-admin-dev, second org slug `second-org` + ORG_ADMIN admin@second-org.dev).\n\nCollection variables: baseUrl, adminEmail, adminPassword, accessToken, orgId, stationId, lockerId1, lockerId2, kitId1, kitId2, tariffId60, tariffId120, tariffId180, orgAdminToken, targetOrgId, foreignOrgId, unknownOrgId.\n\nThe first folder (Auth) logs in as SUPER_ADMIN and sets accessToken; the Cross-Tenant Support Access folder logs in as ORG_ADMIN (orgAdminToken) and exercises the x-org-id impersonation gate (V1–V5); the remaining folders walk through the Phase 3 locations + pricing scenarios against the MockSmartLockGateway (no HA required).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3002/api/v1"
+    },
+    {
+      "key": "adminEmail",
+      "value": "admin@rentiq.dev"
+    },
+    {
+      "key": "adminPassword",
+      "value": "rentiq-admin-dev"
+    },
+    {
+      "key": "accessToken",
+      "value": ""
+    },
+    {
+      "key": "orgId",
+      "value": ""
+    },
+    {
+      "key": "orgAdminToken",
+      "value": ""
+    },
+    {
+      "key": "orgAdminEmail",
+      "value": "admin@second-org.dev"
+    },
+    {
+      "key": "orgAdminPassword",
+      "value": "rentiq-admin-dev"
+    },
+    {
+      "key": "targetOrgId",
+      "value": "40948aba-43bc-4f71-8571-71eae1206566"
+    },
+    {
+      "key": "foreignOrgId",
+      "value": "4cc530d2-8610-4f87-b11e-a3d7c5b4952e"
+    },
+    {
+      "key": "unknownOrgId",
+      "value": "00000000-0000-4000-8000-000000000000"
+    },
+    {
+      "key": "stationId",
+      "value": ""
+    },
+    {
+      "key": "lockerId1",
+      "value": ""
+    },
+    {
+      "key": "lockerId2",
+      "value": ""
+    },
+    {
+      "key": "kitId1",
+      "value": ""
+    },
+    {
+      "key": "kitId2",
+      "value": ""
+    },
+    {
+      "key": "tariffId60",
+      "value": ""
+    },
+    {
+      "key": "tariffId120",
+      "value": ""
+    },
+    {
+      "key": "tariffId180",
+      "value": ""
+    },
+    {
+      "key": "webhookSecret",
+      "value": "dev-secret"
+    },
+    {
+      "key": "haToken",
+      "value": "eyJ...your-HA-long-lived-token"
+    },
+    {
+      "key": "haWebhookSecret",
+      "value": "your-ha-webhook-secret"
+    },
+    {
+      "key": "monoTestToken",
+      "value": "uu9kehswOo6cRpOuGnvaWyK"
+    },
+    {
+      "key": "monoLiveToken",
+      "value": "mwbuBaZiGrG"
+    },
+    {
+      "key": "checkboxLicenseKey",
+      "value": "test60de12c085fa"
+    },
+    {
+      "key": "checkboxTestToken",
+      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+    },
+    {
+      "key": "payerName",
+      "value": "ФОП Андрій Сергійович"
+    },
+    {
+      "key": "iban",
+      "value": "UA3832200100000260"
+    },
+    {
+      "key": "edrpou",
+      "value": "2856105"
+    },
+    {
+      "key": "purpose",
+      "value": "Оренда спортивного інвентарю"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth — Admin login (re-used from Phase 2)",
+      "item": [
+        {
+          "name": "Login (200, sets accessToken)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('accessToken present', () => pm.expect(pm.response.json().accessToken).to.be.a('string'));",
+                  "pm.collectionVariables.set('accessToken', pm.response.json().accessToken);",
+                  "pm.collectionVariables.set('orgId', pm.response.json().admin.orgId || '');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cross-Tenant Support Access (Impersonation) — BR-01.7 / ADR-014",
+      "item": [
+        {
+          "name": "Login as ORG_ADMIN admin@second-org.dev (200, sets orgAdminToken)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('accessToken present', () => pm.expect(pm.response.json().accessToken).to.be.a('string'));",
+                  "pm.collectionVariables.set('orgAdminToken', pm.response.json().accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{orgAdminEmail}}\",\n  \"password\": \"{{orgAdminPassword}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "V1: SUPER_ADMIN impersonates rentiq org via x-org-id (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('tenant-scoped response', () => pm.expect(pm.response.json().items).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations"
+              ]
+            }
+          }
+        },
+        {
+          "name": "V2: ORG_ADMIN with x-org-id → 403 IMPERSONATION_FORBIDDEN",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('code is IMPERSONATION_FORBIDDEN', () => pm.expect(pm.response.json().code).to.eql('IMPERSONATION_FORBIDDEN'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{orgAdminToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations"
+              ]
+            }
+          }
+        },
+        {
+          "name": "V3: SUPER_ADMIN with unknown org → 404 ORG_NOT_FOUND",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('code is ORG_NOT_FOUND', () => pm.expect(pm.response.json().code).to.eql('ORG_NOT_FOUND'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{unknownOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations"
+              ]
+            }
+          }
+        },
+        {
+          "name": "V4: SUPER_ADMIN with suspended org → 403 ORG_SUSPENDED",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('code is ORG_SUSPENDED', () => pm.expect(pm.response.json().code).to.eql('ORG_SUSPENDED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{foreignOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations"
+              ]
+            }
+          }
+        },
+        {
+          "name": "V5: ORG_ADMIN own org, no header (200, unchanged behavior)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('tenant-scoped response', () => pm.expect(pm.response.json().items).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{orgAdminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Org Credentials — Monobank + Checkbox + Payment Details",
+      "item": [
+        {
+          "name": "PATCH /organizations/:id/payment-creds (set Monobank tokens, encrypted on server)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('tokens masked in response', () => { const b = pm.response.json(); pm.expect(b.paymentCreds.testToken).to.match(/^\\*{4}/); pm.expect(b.paymentCreds.enabled).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/organizations/{{orgId}}/payment-creds",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "organizations",
+                "{{orgId}}",
+                "payment-creds"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mode\": \"test\",\n  \"testToken\": \"{{monoTestToken}}\",\n  \"liveToken\": \"{{monoLiveToken}}\",\n  \"redirectUrl\": \"https://t.me/Suppoint_test_bot\",\n  \"enabled\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "PATCH /organizations/:id/payment-details (payer name, IBAN, EDRPOU)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('payment details stored', () => { const b = pm.response.json(); pm.expect(b.paymentDetails.iban).to.eql(pm.collectionVariables.get('iban')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/organizations/{{orgId}}/payment-details",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "organizations",
+                "{{orgId}}",
+                "payment-details"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payerName\": \"{{payerName}}\",\n  \"iban\": \"{{iban}}\",\n  \"edrpou\": \"{{edrpou}}\",\n  \"purpose\": \"{{purpose}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "PATCH /organizations/:id/checkbox-config (set Checkbox license + tokens)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('checkbox tokens masked', () => { const b = pm.response.json(); pm.expect(b.checkboxConfig.licenseKey).to.match(/^\\*{4}/); pm.expect(b.checkboxConfig.enabled).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/organizations/{{orgId}}/checkbox-config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "organizations",
+                "{{orgId}}",
+                "checkbox-config"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mode\": \"test\",\n  \"licenseKey\": \"{{checkboxLicenseKey}}\",\n  \"testToken\": \"{{checkboxTestToken}}\",\n  \"enabled\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "GET /organizations/:id/credentials (view all — tokens masked)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('all tokens masked', () => { const b = pm.response.json(); pm.expect(b.paymentCreds.testToken).to.match(/^\\*{4}/); pm.expect(b.checkboxConfig.licenseKey).to.match(/^\\*{4}/); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/organizations/id/{{orgId}}/credentials",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "organizations",
+                "id",
+                "{{orgId}}",
+                "credentials"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scenario 1 — Admin creates station, lockers, kits, tariffs",
+      "item": [
+        {
+          "name": "POST /stations (201, defaults: isActive=true, isVisibleToClients=false, WORKING, UNKNOWN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('defaults applied', () => { const b = pm.response.json(); pm.expect(b.isActive).to.eql(true); pm.expect(b.isVisibleToClients).to.eql(false); pm.expect(b.workingStatus).to.eql('WORKING'); pm.expect(b.healthStatus).to.eql('UNKNOWN'); pm.expect(b.autoLockDelaySec).to.eql(30); });",
+                  "pm.test('haToken masked in response', () => pm.expect(pm.response.json().haToken).to.match(/^\\*{4}/));",
+                  "pm.test('haWebhookSecret masked in response', () => pm.expect(pm.response.json().haWebhookSecret).to.match(/^\\*{4}/));",
+                  "pm.collectionVariables.set('stationId', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "station-1"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Poshtova Ploshcha\",\n  \"address\": \"Kyiv, Poshtova Sq.\",\n  \"haUrlOrIp\": \"http://10.0.0.42:8123\",\n  \"haToken\": \"{{haToken}}\",\n  \"haWebhookSecret\": \"{{haWebhookSecret}}\",\n  \"autoLockDelaySec\": 30\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /lockers #1 (201, sets lockerId1)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('locker defaults AVAILABLE', () => pm.expect(pm.response.json().status).to.eql('AVAILABLE'));",
+                  "pm.collectionVariables.set('lockerId1', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "locker-1"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/lockers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lockers"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stationId\": \"{{stationId}}\",\n  \"name\": \"Locker 1\",\n  \"haLockEntityId\": \"lock.l1\",\n  \"haDoorSensorEntityId\": \"binary_sensor.l1_door\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /lockers #2 (201, sets lockerId2)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('lockerId2', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "locker-2"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/lockers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lockers"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stationId\": \"{{stationId}}\",\n  \"name\": \"Locker 2\",\n  \"haLockEntityId\": \"lock.l2\",\n  \"haDoorSensorEntityId\": \"binary_sensor.l2_door\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /inventory-kits #1 (201, sets kitId1)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('kit created unassigned', () => pm.expect(pm.response.json().lockerId).to.eql(null));",
+                  "pm.collectionVariables.set('kitId1', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "kit-1"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/inventory-kits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "inventory-kits"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stationId\": \"{{stationId}}\",\n  \"name\": \"SUP Board A\",\n  \"kitType\": \"SUP_BOARD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /inventory-kits #2 (201, sets kitId2)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('kitId2', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "kit-2"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/inventory-kits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "inventory-kits"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stationId\": \"{{stationId}}\",\n  \"name\": \"SUP Board B\",\n  \"kitType\": \"SUP_BOARD\"\n}"
+            }
+          }
+        },
+        {
+          "name": "PATCH /lockers/:id assign kit #1 (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('kit assigned', () => pm.expect(pm.response.json().inventoryKitId).to.eql(pm.collectionVariables.get('kitId1')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/lockers/{{lockerId1}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lockers",
+                "{{lockerId1}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inventoryKitId\": \"{{kitId1}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "PATCH /lockers/:id assign kit #2 (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('kit assigned', () => pm.expect(pm.response.json().inventoryKitId).to.eql(pm.collectionVariables.get('kitId2')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/lockers/{{lockerId2}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lockers",
+                "{{lockerId2}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inventoryKitId\": \"{{kitId2}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /tariffs 60min WEEKDAY (201, sets tariffId60)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('price matches', () => pm.expect(pm.response.json().priceMinor).to.eql(10000));",
+                  "pm.collectionVariables.set('tariffId60', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "tariff-60"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tariffs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tariffs"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kitType\": \"SUP_BOARD\",\n  \"dayType\": \"WEEKDAY\",\n  \"durationMinutes\": 60,\n  \"priceMinor\": 10000,\n  \"currency\": \"UAH\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /tariffs 120min WEEKDAY (201, sets tariffId120)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('tariffId120', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "tariff-120"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tariffs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tariffs"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kitType\": \"SUP_BOARD\",\n  \"dayType\": \"WEEKDAY\",\n  \"durationMinutes\": 120,\n  \"priceMinor\": 18000,\n  \"currency\": \"UAH\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /tariffs 180min WEEKDAY (201, sets tariffId180)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('tariffId180', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "tariff-180"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tariffs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tariffs"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kitType\": \"SUP_BOARD\",\n  \"dayType\": \"WEEKDAY\",\n  \"durationMinutes\": 180,\n  \"priceMinor\": 24000,\n  \"currency\": \"UAH\"\n}"
+            }
+          }
+        },
+        {
+          "name": "PATCH /stations/:id make visible (200, isVisibleToClients=true)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('now visible', () => pm.expect(pm.response.json().isVisibleToClients).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations/{{stationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations",
+                "{{stationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isVisibleToClients\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "GET /stations admin list (200, includes the station)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('at least one station', () => pm.expect(pm.response.json().items.length).to.be.at.least(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scenario 2 — Renter sees bookable stations + lockers",
+      "item": [
+        {
+          "name": "GET /stations?visible=true&active=true (200, bookable, availableLockersCount=2)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('exactly one bookable station', () => { const items = pm.response.json().items; pm.expect(items.length).to.eql(1); pm.expect(items[0].availableLockersCount).to.eql(2); pm.expect(items[0].displayStatus).to.eql('AVAILABLE'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations?visible=true&active=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations"
+              ],
+              "query": [
+                {
+                  "key": "visible",
+                  "value": "true"
+                },
+                {
+                  "key": "active",
+                  "value": "true"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /stations/:id/lockers (200, 2 bookable lockers with 3 tariffs each)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('2 bookable lockers', () => { const items = pm.response.json().items; pm.expect(items.length).to.eql(2); pm.expect(items[0].kitType).to.eql('SUP_BOARD'); pm.expect(items[0].tariffs.length).to.eql(3); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations/{{stationId}}/lockers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations",
+                "{{stationId}}",
+                "lockers"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Negative: hide station → disappears from renter view",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('station hidden from renter', () => pm.expect(pm.response.json().items.length).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations?visible=true&active=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations"
+              ],
+              "query": [
+                {
+                  "key": "visible",
+                  "value": "true"
+                },
+                {
+                  "key": "active",
+                  "value": "true"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cleanup: re-show station",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations/{{stationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations",
+                "{{stationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isVisibleToClients\": true\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scenario 3 — Tariff uniqueness + quote",
+      "item": [
+        {
+          "name": "POST duplicate tariff → 422 DUPLICATE_TARIFF (FR-026)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('code is DUPLICATE_TARIFF', () => pm.expect(pm.response.json().code).to.eql('DUPLICATE_TARIFF'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "tariff-dup"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tariffs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tariffs"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kitType\": \"SUP_BOARD\",\n  \"dayType\": \"WEEKDAY\",\n  \"durationMinutes\": 60,\n  \"priceMinor\": 20000,\n  \"currency\": \"UAH\"\n}"
+            }
+          }
+        },
+        {
+          "name": "GET /tariffs/quote (200, exact price + tariffId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('price + tariffId', () => { const b = pm.response.json(); pm.expect(b.priceMinor).to.eql(10000); pm.expect(b.currency).to.eql('UAH'); pm.expect(b.tariffId).to.eql(pm.collectionVariables.get('tariffId60')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tariffs/quote?kitType=SUP_BOARD&dayType=WEEKDAY&durationMinutes=60",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tariffs",
+                "quote"
+              ],
+              "query": [
+                {
+                  "key": "kitType",
+                  "value": "SUP_BOARD"
+                },
+                {
+                  "key": "dayType",
+                  "value": "WEEKDAY"
+                },
+                {
+                  "key": "durationMinutes",
+                  "value": "60"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /tariffs/quote unknown key → 404 TARIFF_NOT_FOUND",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('code is TARIFF_NOT_FOUND', () => pm.expect(pm.response.json().code).to.eql('TARIFF_NOT_FOUND'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tariffs/quote?kitType=UNKNOWN&dayType=WEEKDAY&durationMinutes=999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tariffs",
+                "quote"
+              ],
+              "query": [
+                {
+                  "key": "kitType",
+                  "value": "UNKNOWN"
+                },
+                {
+                  "key": "dayType",
+                  "value": "WEEKDAY"
+                },
+                {
+                  "key": "durationMinutes",
+                  "value": "999"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /tariffs list with filter (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('3 tariffs returned', () => pm.expect(pm.response.json().items.length).to.eql(3));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tariffs?kitType=SUP_BOARD&dayType=WEEKDAY",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tariffs"
+              ],
+              "query": [
+                {
+                  "key": "kitType",
+                  "value": "SUP_BOARD"
+                },
+                {
+                  "key": "dayType",
+                  "value": "WEEKDAY"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /tariffs/:id update price (200, key immutable)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('price updated, key unchanged', () => { const b = pm.response.json(); pm.expect(b.priceMinor).to.eql(12000); pm.expect(b.kitType).to.eql('SUP_BOARD'); pm.expect(b.durationMinutes).to.eql(60); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tariffs/{{tariffId60}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tariffs",
+                "{{tariffId60}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priceMinor\": 12000\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scenario 4 — Admin open + auto-relock (mock adapter)",
+      "item": [
+        {
+          "name": "POST /lockers/:id/open (200, schedules auto-relock at now+30s)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('acknowledged', () => pm.expect(pm.response.json().acknowledged).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/lockers/{{lockerId1}}/open",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lockers",
+                "{{lockerId1}}",
+                "open"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /lockers/:id/close (200, idempotent — cancels pending relock)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('acknowledged', () => pm.expect(pm.response.json().acknowledged).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/lockers/{{lockerId1}}/close",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lockers",
+                "{{lockerId1}}",
+                "close"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /lockers/:id/close again (idempotent — no double-lock error, FR-015)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/lockers/{{lockerId1}}/close",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lockers",
+                "{{lockerId1}}",
+                "close"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scenario 5 — Station health",
+      "item": [
+        {
+          "name": "GET /stations/:id/health (200, shows healthStatus + effective active)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('health fields present', () => { const b = pm.response.json(); pm.expect(b.healthStatus).to.be.a('string'); pm.expect(b.adminIntendedIsActive).to.be.a('boolean'); pm.expect(b.isActiveForBookability).to.be.a('boolean'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations/{{stationId}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations",
+                "{{stationId}}",
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /stations/:id isActive=false (admin override, FR-010)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('admin deactivated', () => pm.expect(pm.response.json().adminIntendedIsActive).to.eql(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations/{{stationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations",
+                "{{stationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}"
+            }
+          }
+        },
+        {
+          "name": "GET /stations/:id/health (isActiveForBookability=false after admin override)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('effective active is false', () => pm.expect(pm.response.json().isActiveForBookability).to.eql(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations/{{stationId}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations",
+                "{{stationId}}",
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cleanup: re-activate station",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations/{{stationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations",
+                "{{stationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": true\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scenario 6 — Unauthorized door open (webhook)",
+      "item": [
+        {
+          "name": "POST /api/v1/webhooks/ha/door-events OPEN on AVAILABLE locker → 200 (UnauthorizedDoorOpenDetected)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('acknowledged', () => pm.expect(pm.response.json().acknowledged).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HA-Webhook-Secret",
+                "value": "{{webhookSecret}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/webhooks/ha/door-events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "webhooks",
+                "ha",
+                "door-events"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lockerId\": \"{{lockerId1}}\",\n  \"doorState\": \"OPEN\",\n  \"eventTimestamp\": \"2026-08-09T12:34:56Z\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/webhooks/ha/door-events CLOSED → 200 (LockerClosed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('acknowledged', () => pm.expect(pm.response.json().acknowledged).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HA-Webhook-Secret",
+                "value": "{{webhookSecret}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/webhooks/ha/door-events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "webhooks",
+                "ha",
+                "door-events"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lockerId\": \"{{lockerId1}}\",\n  \"doorState\": \"CLOSED\",\n  \"eventTimestamp\": \"2026-08-09T12:35:00Z\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/webhooks/ha/door-events UNKNOWN → 200 (no alert, logged)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('acknowledged', () => pm.expect(pm.response.json().acknowledged).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HA-Webhook-Secret",
+                "value": "{{webhookSecret}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/webhooks/ha/door-events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "webhooks",
+                "ha",
+                "door-events"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lockerId\": \"{{lockerId1}}\",\n  \"doorState\": \"UNKNOWN\",\n  \"eventTimestamp\": \"2026-08-09T12:36:00Z\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/webhooks/ha/door-events missing secret → 401 WEBHOOK_SECRET_INVALID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('code is WEBHOOK_SECRET_INVALID', () => pm.expect(pm.response.json().code).to.eql('WEBHOOK_SECRET_INVALID'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/webhooks/ha/door-events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "webhooks",
+                "ha",
+                "door-events"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lockerId\": \"{{lockerId1}}\",\n  \"doorState\": \"OPEN\",\n  \"eventTimestamp\": \"2026-08-09T12:34:56Z\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Negative — Validation errors",
+      "item": [
+        {
+          "name": "POST /stations autoLockDelaySec=0 → 422 STATION_AUTOLOCK_INVALID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('code is STATION_AUTOLOCK_INVALID', () => pm.expect(pm.response.json().code).to.eql('STATION_AUTOLOCK_INVALID'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "station-bad"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Bad Station\",\n  \"haUrlOrIp\": \"http://10.0.0.99:8123\",\n  \"haToken\": \"ref\",\n  \"haWebhookSecret\": \"ws\",\n  \"autoLockDelaySec\": 0\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /stations empty haToken → 422 STATION_TOKEN_REF_EMPTY",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('code is STATION_TOKEN_REF_EMPTY', () => pm.expect(pm.response.json().code).to.eql('STATION_TOKEN_REF_EMPTY'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "station-bad2"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Bad Station\",\n  \"haUrlOrIp\": \"http://10.0.0.99:8123\",\n  \"haToken\": \"\",\n  \"haWebhookSecret\": \"ws\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /tariffs durationMinutes=0 → 422 TARIFF_DURATION_INVALID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('code is TARIFF_DURATION_INVALID', () => pm.expect(pm.response.json().code).to.eql('TARIFF_DURATION_INVALID'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "tariff-bad"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tariffs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tariffs"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kitType\": \"SUP_BOARD\",\n  \"dayType\": \"WEEKDAY\",\n  \"durationMinutes\": 0,\n  \"priceMinor\": 1000\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /tariffs negative priceMinor → 422 TARIFF_PRICE_INVALID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('code is TARIFF_PRICE_INVALID', () => pm.expect(pm.response.json().code).to.eql('TARIFF_PRICE_INVALID'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "tariff-bad2"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tariffs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tariffs"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kitType\": \"SUP_BOARD\",\n  \"dayType\": \"WEEKDAY\",\n  \"durationMinutes\": 30,\n  \"priceMinor\": -1\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /tariffs bad dayType → 422 TARIFF_DAY_TYPE_INVALID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('code is TARIFF_DAY_TYPE_INVALID', () => pm.expect(pm.response.json().code).to.eql('TARIFF_DAY_TYPE_INVALID'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "tariff-bad3"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tariffs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tariffs"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kitType\": \"SUP_BOARD\",\n  \"dayType\": \"HOLIDAY\",\n  \"durationMinutes\": 30,\n  \"priceMinor\": 1000\n}"
+            }
+          }
+        },
+        {
+          "name": "GET /stations/:id 404 unknown station → STATION_NOT_FOUND",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('code is STATION_NOT_FOUND', () => pm.expect(pm.response.json().code).to.eql('STATION_NOT_FOUND'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations/00000000-0000-4000-8000-000000000000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations",
+                "00000000-0000-4000-8000-000000000000"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cleanup — Soft-delete + teardown",
+      "item": [
+        {
+          "name": "DELETE /tariffs/:id (soft delete, 200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tariffs/{{tariffId180}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tariffs",
+                "{{tariffId180}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "DELETE /inventory-kits/:id (soft-retire, 200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/inventory-kits/{{kitId2}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "inventory-kits",
+                "{{kitId2}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /lockers/:id unassign kit (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/lockers/{{lockerId2}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lockers",
+                "{{lockerId2}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inventoryKitId\": null\n}"
+            }
+          }
+        },
+        {
+          "name": "PATCH /stations/:id MAINTENANCE (200, FR-033)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('maintenance mode', () => pm.expect(pm.response.json().workingStatus).to.eql('MAINTENANCE'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "x-org-id",
+                "value": "{{targetOrgId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stations/{{stationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stations",
+                "{{stationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"workingStatus\": \"MAINTENANCE\"\n}"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

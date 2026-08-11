@@ -51,9 +51,10 @@ export interface SmartLockGateway {
 ## Operational Contract
 
 - **Per-station instance**: one adapter instance per station, configured from the
-  station's `HaConnectionConfig` VO. The `unlock`/`lock`/`readDoorState` operations
-  resolve the raw token from the `SecretStore` port at call time (FR-021), never caching
-  it in the adapter beyond the single operation.
+  station's `HaConnectionConfig` VO. The `token` field holds the plaintext HA token
+  (decrypted from `ha_token_encrypted` by `StationRepository` via `CryptoService`); the
+  adapter uses it directly for HA REST calls. The plaintext exists only in memory — never
+  persisted in DB (encrypted column) or serialized to API responses (masked in DTOs).
 - **Timeouts** (Home Assistant adapter): connect 3 s, read 5 s (tuned from the legacy
   suppoint-bot's HA read-timeout handling). The mock adapter uses deterministic delays
   < 50 ms.
@@ -80,7 +81,7 @@ export interface SmartLockGateway {
 `CLOSED`) and `Set<stationId>` of "unreachable" stations (controllable in tests via
 `mock.setReachable(stationId, false)`). It implements every port method and lets tests
 inject failures deterministically. It is the default adapter in dev + CI; the
-`HomeAssistantGateway` is auto-registered only when `HA_BASE_URL` + `HA_TOKEN_REF` are
+`HomeAssistantGateway` is auto-registered only when `HA_BASE_URL` is
 present (stage/prod). The same contract test suite runs against both adapters on stage.
 
 ## What This Port Does NOT Cover
